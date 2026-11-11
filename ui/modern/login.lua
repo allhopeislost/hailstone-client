@@ -20,6 +20,7 @@ local forgetName = nil  -- the account the Forget question is about
 local more = false      -- More options unfolded
 local boxOpen = false   -- the box set card open
 local removeName = nil   -- the add-on the Remove question is about
+local removeClicked = nil    -- the add-on whose Remove was clicked this frame (the card opens the question)
 local addonTab = nil    -- the add-ons card's tab to select next frame ("store" or "mine"), nil: as it is
 local testedTab = nil   -- test.addontab as last applied
 local notesTested = false -- test.whatsnew applied
@@ -496,10 +497,7 @@ local function addonRow(a, r, s)
       end
       ui.SameLine()
       ui.BeginDisabled(not r.canRemove)
-      if ui.Button("Remove") then
-        removeName = r.name
-        ui.OpenPopup("##removeaddon")
-      end
+      if ui.Button("Remove") then removeClicked = r.name end
       ui.EndDisabled()
     end
     -- the server's compiled plugin: the player's word on it (docs/plugins.md "The server's compiled plugins ask first")
@@ -669,6 +667,11 @@ local function addonsCard(view, s, bh)
     ui.EndTabBar()
   end
   addonTab = nil
+  -- (opened here, not in the row: a popup's id is hashed with the window it opens in, and the rows are in a child)
+  if removeClicked then
+    removeName, removeClicked = removeClicked, nil
+    ui.OpenPopup("##removeaddon")
+  end
   if a.available and a.browsed then
     if ui.Button("Refresh the list") then eq.LoginDo("addonBrowse", true) end
     P.Tip("Fetch the list of add-ons again")

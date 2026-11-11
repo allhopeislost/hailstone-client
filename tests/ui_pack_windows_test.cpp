@@ -130,6 +130,83 @@ TEST_CASE("UI packs: every script of the shipped UIs loads, and their windows dr
     }
 }
 
+// The add-on manager's Remove button (modern pack) opens its question. The rows are in a child window, and a popup's
+// id is hashed with the window it opens in, so a question opened from the row was never drawn: nothing was removed.
+// The button is found by clicking, the way a player would: open the row, then try the line under it.
+TEST_CASE("UI packs (modern): Remove on an installed add-on opens the question") {
+    fs::path src = fs::path(__FILE__).parent_path().parent_path() / "ui" / "modern";
+    hailstone::test::ScratchDir dir_scratch("ui_pack_addon_remove_test");
+    fs::path dir = dir_scratch.path();
+    fs::create_directories(dir / "game");
+    fs::copy(src, dir / "modern", fs::copy_options::recursive);
+    ImGuiContext* ctx = ImGui::CreateContext();
+    ImGui::GetIO().IniFilename = nullptr;
+    unsigned char* px = nullptr;
+    int w = 0, h = 0;
+    ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&px, &w, &h);
+    {
+        Session s(dir, "modern");
+        s.host.in_game = s.host.ui_ready = false;
+        REQUIRE(luaL_dostring(s.lua.state(), "eq.InGame = function() return false end") == LUA_OK);
+        ui::LoginView login;
+        login.servers_dir = dir / "servers";
+        login.ui_packs = {{"modern", "Modern", "", "mouse", false, {}}};
+        login.ui = login.default_ui = "modern";
+        ServerProfile p;
+        p.id = "alpha";
+        p.name = "Alpha";
+        p.host = "127.0.0.1";
+        login.profiles = {p};
+        ui::select_profile(login, 0);
+        s.host.login = &login;
+        login.addons.open = true;
+        login.addons.available = true;
+        ui::AddonRowView r;
+        r.name = "autoloot";
+        r.kind = "script";
+        r.group = "installed";
+        r.version = "1.0.0";
+        r.state = "uptodate";
+        r.can_remove = true;
+        login.addons.rows.push_back(r);
+        REQUIRE(luaL_dostring(s.lua.state(), "ui.SetSetting('test.addontab', 'mine')") == LUA_OK);
+        s.frames(3);
+        REQUIRE(ImGui::FindWindowByName("UI errors") == nullptr);
+
+        ImGuiWindow* list = nullptr;
+        for (ImGuiWindow* win : ctx->Windows)
+            if (std::string_view(win->Name).find("addonlist") != std::string_view::npos) list = win;
+        REQUIRE(list != nullptr);
+        auto click = [&](float x, float y) {
+            ImGuiIO& io = ImGui::GetIO();
+            io.AddMousePosEvent(x, y);
+            s.frames(1);
+            io.AddMouseButtonEvent(0, true);
+            s.frames(1);
+            io.AddMouseButtonEvent(0, false);
+            s.frames(1);
+        };
+        const float x0 = list->Pos.x, y0 = list->Pos.y, x1 = x0 + list->Size.x, y1 = y0 + list->Size.y;
+        // The row's heading, then its tree node: a click opens it (the list grows).
+        const float closed = list->ContentSize.y;
+        float node_y = y0 + 4;
+        for (; node_y < y1 && list->ContentSize.y <= closed; node_y += 6) click(x0 + 40, node_y);
+        REQUIRE(list->ContentSize.y > closed);
+        // The open row's buttons: one of them is Remove, and the question opens from it.
+        // (the buttons are the last line of the open row: the node's own line is above, and a click on it closes it)
+        const float last_line = y0 + list->ContentSize.y;
+        for (float y = last_line - 28; y < last_line + 8 && ctx->OpenPopupStack.Size == 0; y += 3)
+            for (float x = x0 + 10; x < x1 && ctx->OpenPopupStack.Size == 0; x += 10) click(x, y);
+        REQUIRE(ctx->OpenPopupStack.Size == 1);
+        s.frames(2);
+        // Drawn, not just opened: a popup opened in another window than the one that draws it stays open and unseen.
+        REQUIRE(ctx->OpenPopupStack.Size == 1);
+        CHECK(ctx->OpenPopupStack[0].Window != nullptr);
+        CHECK(ImGui::FindWindowByName("UI errors") == nullptr);
+    }
+    ImGui::DestroyContext(ctx);
+}
+
 TEST_CASE("UI packs: each draws the login, server select and character select screens in the client's place") {
     for (const char* pack : {"modern", "gamepad"}) {
         INFO(pack);
