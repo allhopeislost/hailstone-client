@@ -30,12 +30,19 @@ local function heading(text)
 end
 local LABEL_W = 170 -- the label column, in unscaled pixels
 local U = 1         -- the UI scale, this frame
+local fuzzy = dofile("lib/fuzzy.lua")
+local search = "" -- the search field's text; a row that does not match it is left out
+local lastRowShown = true
+
+local function matches(label, tooltip) return fuzzy.match(search, label, tooltip) end
 
 local function tip(text)
   if text and ui.IsItemHovered(ui.HoveredFlags.DelayShort) then ui.SetTooltip(text) end
 end
 
 local function row(label, tooltip, draw)
+  lastRowShown = matches(label, tooltip)
+  if not lastRowShown then return end
   ui.TableNextRow()
   ui.TableNextColumn()
   ui.Text(label)
@@ -48,6 +55,7 @@ end
 
 -- A note under the row above, in the value column.
 local function note(text)
+  if not lastRowShown then return end
   ui.TableNextRow()
   ui.TableNextColumn()
   ui.TableNextColumn()
@@ -538,11 +546,13 @@ local function displayTab()
       "Spreads or narrows the picture's light and dark.")
     ticks("gamma", "Gamma", function(t) return string.format("%.2f", 0.5 + t * 0.05) end,
       "Brightens (higher) or darkens (lower) the shadows and mid tones.")
-    ui.TableNextRow()
-    ui.TableNextColumn()
-    ui.TableNextColumn()
-    if ui.Button("Reset Picture", 0, 0) then
-      for _, o in ipairs({ "brightness", "contrast", "gamma" }) do eq.SetOption(o, 10) end
+    if search == "" then
+      ui.TableNextRow()
+      ui.TableNextColumn()
+      ui.TableNextColumn()
+      if ui.Button("Reset Picture", 0, 0) then
+        for _, o in ipairs({ "brightness", "contrast", "gamma" }) do eq.SetOption(o, 10) end
+      end
     end
   end)
   -- The RoF2 asset folder the game reads (hailstone.ini assets.path); the picker changes it on the login screen.
@@ -553,19 +563,21 @@ local function displayTab()
         .. "Hailstone never changes it.", function()
         ui.TextWrapped(eq.OptionChoices("asset_folder")[1] or "?")
       end)
-      ui.TableNextRow()
-      ui.TableNextColumn()
-      ui.TableNextColumn()
-      if pick == 0 then
-        if ui.Button("Change Asset Folder", 0, 0) then eq.SetOption("asset_folder_pick", 1) end
-        tip("Shows the folder picker on the login screen (after camping out), or the next time the game starts.")
-      else
-        if ui.Button("Keep This Folder", 0, 0) then eq.SetOption("asset_folder_pick", 0) end
-      end
-      if pick ~= 0 then
-        note(eq.Option("asset_folder_override") == 1
-          and "Started with --game-dir or EQ_GAME_DIR: that folder is used while it is given."
-          or "The folder picker shows on the login screen: camp out to choose another asset folder.")
+      if search == "" then
+        ui.TableNextRow()
+        ui.TableNextColumn()
+        ui.TableNextColumn()
+        if pick == 0 then
+          if ui.Button("Change Asset Folder", 0, 0) then eq.SetOption("asset_folder_pick", 1) end
+          tip("Shows the folder picker on the login screen (after camping out), or the next time the game starts.")
+        else
+          if ui.Button("Keep This Folder", 0, 0) then eq.SetOption("asset_folder_pick", 0) end
+        end
+        if pick ~= 0 then
+          note(eq.Option("asset_folder_override") == 1
+            and "Started with --game-dir or EQ_GAME_DIR: that folder is used while it is given."
+            or "The folder picker shows on the login screen: camp out to choose another asset folder.")
+        end
       end
     end)
   end
@@ -676,18 +688,20 @@ local function graphicsTab()
           end
         end)
       if pack ~= packAtStart then note("Restart the game to change the texture pack.") end
-      ui.TableNextRow()
-      ui.TableNextColumn()
-      ui.TableNextColumn()
-      if eq.Option("texture_studio") == 1 then
-        if ui.Button("Texture Studio...", 0, 0) then eq.SetOption("texture_studio", 1) end
-        tip("Builds an HD texture pack from your own game files on your graphics card (a program of its own).")
-      else
-        ui.TextDisabled("Texture Studio builds HD packs: install it from Add-ons on the login screen.")
+      if search == "" then
+        ui.TableNextRow()
+        ui.TableNextColumn()
+        ui.TableNextColumn()
+        if eq.Option("texture_studio") == 1 then
+          if ui.Button("Texture Studio...", 0, 0) then eq.SetOption("texture_studio", 1) end
+          tip("Builds an HD texture pack from your own game files on your graphics card (a program of its own).")
+        else
+          ui.TextDisabled("Texture Studio builds HD packs: install it from Add-ons on the login screen.")
+        end
       end
     end)
   end
-  if ui.Button("Restore Default Graphics", 0, 0) then
+  if search == "" and ui.Button("Restore Default Graphics", 0, 0) then
     -- (anti-aliasing and the lighting mode stay as they are)
     eq.SetOption("view_distance", 6)
     eq.SetOption("exposure", 10)
@@ -753,7 +767,7 @@ local function keyBindings()
     ui.TableHeadersRow()
     for r = 0, rows - 1 do
       local texts = eq.ListRow(WINDOW, KEYS_LIST, r)
-      if texts then
+      if texts and matches(texts[1]) then
         ui.TableNextRow()
         ui.TableNextColumn()
         ui.Text(texts[1] or "")
@@ -804,7 +818,7 @@ local function chatTab()
     ui.TableHeadersRow()
     for r = 0, rows - 1 do
       local texts = eq.ListRow(WINDOW, FILTERS, r)
-      if texts then
+      if texts and matches(texts[1]) then
         ui.TableNextRow()
         ui.TableNextColumn()
         ui.Text(texts[1] or "")
@@ -842,7 +856,7 @@ local function colorsTab()
     ui.TableHeadersRow()
     for r = 0, rows - 1 do
       local texts = eq.ListRow(WINDOW, COLORS, r)
-      if texts then
+      if texts and matches(texts[1]) then
         ui.TableNextRow()
         ui.TableNextColumn()
         if ui.Selectable((texts[1] or "") .. "##c" .. r, r == selected, ui.SelectableFlags.SpanAllColumns) then
@@ -905,6 +919,11 @@ local function pages(visible)
   if #eq.PluginOptions() > 0 then -- the Plugins tab, while a loaded plugin has options
     tabs = { table.unpack(TABS) }
     tabs[#tabs + 1] = { "Plugins", pluginsTab }
+  end
+  if visible then
+    ui.SetNextItemWidth(-1)
+    search = ui.InputTextWithHint("##optionssearch", "Search this tab", search, 128)
+    if search:match("^%s*$") then search = "" end
   end
   if visible and ui.BeginTabBar("##optionstabs") then
     for _, t in ipairs(tabs) do
