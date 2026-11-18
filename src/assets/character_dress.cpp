@@ -264,6 +264,7 @@ std::shared_ptr<const CharacterMesh> CharacterLibrary::dress(const CharacterMode
         }
         apply_npc_tint(model, a, mesh);
         attach_items(model, a, mesh);
+        if (bodiless_skeleton(model)) mesh.held_reach = dressed_reach(model, mesh);
         result = std::make_shared<const CharacterMesh>(std::move(mesh));
         log::debug("dressed {}: {} vertices, {} materials", key, result->vertices.size(), result->materials.size());
     } catch (const std::exception& e) {
