@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Bard songs animate again: a singing song always plays its cast animation, and an instrument song plays its drum, lute or horn animation when the bard holds an instrument and is not sitting. On the newer (EQG) models the model does not suppress it, as in the original
+
 ## 0.7.2-beta (2026-11-19)
 
 - **Lua 5.5:** Lua is now 5.5.1 (was 5.4.7), for the interface packs, plugin windows and MQ-style scripts. **A script or add-on that assigns to a `for` loop's variable no longer loads** and must copy it into a `local` first; most other 5.4 code runs unchanged
