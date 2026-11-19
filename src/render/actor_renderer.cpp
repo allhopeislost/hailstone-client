@@ -27,6 +27,7 @@
 #include "game/sine_table.h"
 #include "game/view_distance.h"
 #include "game/world_state.h"
+#include "render/corpse_pose.h"
 #include "render/culling.h"
 #include "render/look_eviction.h"
 #include "render/material_state.h"
@@ -811,10 +812,10 @@ void ActorRenderer::pose_bones(const ActorDraw& a, std::vector<assets::BonePose>
     const auto& m = *a.model;
     // One bone group's tracks (CBoneGroup): the clip, cross-faded from the previous one by the linear weight.
     auto sample = [&](const assets::AnimationClip& clip, float time, bool loop, const assets::AnimationClip* from,
-                      float from_time, float blend, std::vector<assets::BonePose>& out) {
+                      float from_time, bool from_loop, float blend, std::vector<assets::BonePose>& out) {
         m.sample_local(clip, time, loop, out);
         if (from && blend < 1.0f) {
-            m.sample_local(*from, from_time, true, previous);
+            m.sample_local(*from, from_time, from_loop, previous);
             float t = std::clamp(blend, 0.0f, 1.0f);
             for (std::size_t b = 0; b < out.size() && b < previous.size(); ++b) {
                 out[b].rotation = glm::normalize(glm::slerp(previous[b].rotation, out[b].rotation, t));
@@ -823,11 +824,11 @@ void ActorRenderer::pose_bones(const ActorDraw& a, std::vector<assets::BonePose>
             }
         }
     };
-    sample(*a.clip, a.time, a.loop, a.previous_clip, a.previous_time, a.blend, local);
+    sample(*a.clip, a.time, a.loop, a.previous_clip, a.previous_time, a.previous_loop, a.blend, local);
     if (a.upper_clip && a.bone_groups) {
         thread_local std::vector<assets::BonePose> upper;
-        sample(*a.upper_clip, a.upper_time, a.upper_loop, a.upper_previous_clip, a.upper_previous_time, a.upper_blend,
-               upper);
+        sample(*a.upper_clip, a.upper_time, a.upper_loop, a.upper_previous_clip, a.upper_previous_time,
+               a.upper_previous_loop, a.upper_blend, upper);
         const auto& groups = *a.bone_groups;
         for (std::size_t b = 0; b < local.size() && b < upper.size() && b < groups.size(); ++b)
             if (groups[b] == game::kUpperBones) local[b] = upper[b];
@@ -1581,9 +1582,17 @@ void ActorRenderer::prepare_spawns(const FrameInfo& frame, const glm::vec3& came
         float scale = s.heights.model_scale; // the actor's scale: SetHeights' +0x31c (game/spawn_heights.h)
 
         auto& st = spawns_[id];
+        // Drawn alive last frame: a visible living -> dead transition plays the fall, even when the model changes in
+        // the same frame (a fresh state would otherwise show the end pose).
+        const bool was_alive = drawn_alive_last_frame(st.drawn_alive, st.hidden);
         st.seen = true;
-        if (spawn_state_fresh(st, model)) st = SpawnState{model};
+        // A state that starts here has no memory of the spawn's death: a corpse already dead is posed at the end of
+        // its death clip (below) instead of falling again.
+        const bool fresh = spawn_state_fresh(st, model);
+        if (fresh) st = SpawnState{model};
         st.seen = true;
+        const bool dead = spawn_dead(s.is_corpse, s.stand_state);
+        st.drawn_alive = !dead;
         // Appearance: rebuilt when it changes (WearChange, Illusion), on the worker; until it is ready (and applied
         // within the frame's budget) the previous one stays. One applied before for the same model and look is
         // taken at once.
@@ -1734,11 +1743,9 @@ void ActorRenderer::prepare_spawns(const FrameInfo& frame, const glm::vec3& came
         req.speed_run = speed_run;
         req.follow_up_after = choice.follow_up;
         req.base_column = choice.column;
-        if (s.is_corpse || s.stand_state == 115) {
-            req.base = &model->first_clip({"D05", "D04", "P01"}, holding);
-            req.base_anim = 0x10; // D05
-            req.loop = false;
-            req.corpse = true;
+        if (dead) {
+            corpse_request(req, model->first_clip({"D05", "D04", "P01"}, holding),
+                           corpse_starts_at_end(fresh, was_alive, dead));
         } else if (mount && !new_style) {
             // 0x4b15b0 on a rider: its movement and idle animations become the mount race's rider animation
             // (racedata.txt's last field, empty in the shipped file: 0x4a, P09), or 0x4e (L10) while the mount runs
@@ -1796,6 +1803,7 @@ void ActorRenderer::prepare_spawns(const FrameInfo& frame, const glm::vec3& came
         a.loop = lower.loop;
         a.previous_clip = lower.blend < 1.0f ? lower.previous : nullptr;
         a.previous_time = lower.shown_previous_time();
+        a.previous_loop = lower.previous_loop;
         a.blend = lower.blend;
         if (layers.split()) {
             const GroupTrack& upper = layers.group[game::kUpperBones];
@@ -1804,6 +1812,7 @@ void ActorRenderer::prepare_spawns(const FrameInfo& frame, const glm::vec3& came
             a.upper_loop = upper.loop;
             a.upper_previous_clip = upper.blend < 1.0f ? upper.previous : nullptr;
             a.upper_previous_time = upper.shown_previous_time();
+            a.upper_previous_loop = upper.previous_loop;
             a.upper_blend = upper.blend;
             a.bone_groups = &bone_groups(*model);
         }

@@ -26,6 +26,8 @@ bool GroupTrack::start(const assets::AnimationClip* c, std::uint8_t code, float 
         previous = clip;
         previous_time = time;
         previous_reverse = reverse;
+        // Only the corpse death clip is held at its end when it fades out; a living one-shot keeps the old sampling.
+        previous_loop = corpse ? loop : true;
         blend = 0.0f;
         blend_seconds = blend_s;
     } else {
@@ -66,6 +68,15 @@ bool GroupTrack::completed() const {
 
 void GroupTrack::sync_to(const GroupTrack& other) {
     if (clip && clip == other.clip && column == other.column) time = other.time;
+}
+
+void GroupTrack::finish() {
+    if (!clip) return;
+    const float d = clip->duration_seconds();
+    time = d;
+    elapsed = rate > 0.0f ? d / rate : d;
+    previous = nullptr;
+    blend = 1.0f;
 }
 
 namespace {
@@ -125,6 +136,7 @@ bool ActorLayers::start_action(const assets::AnimationClip* clip, std::uint8_t a
                 upper_only = lower_mode != 2;
                 if (upper_mode != 2) {
                     lo.start(clip, anim, rate, false, false, blend_seconds(req, lo.anim, anim, 100.0f), false, req.action_column);
+                    lo.corpse = false;
                     return false;
                 }
             } else {
@@ -150,8 +162,10 @@ bool ActorLayers::start_action(const assets::AnimationClip* clip, std::uint8_t a
     }
     // BlendToAnimation: a group already playing the clip keeps it.
     up.start(clip, anim, rate, false, false, blend_seconds(req, up.anim, anim, 100.0f), false, req.action_column);
+    up.corpse = false;
     if (!upper_only) {
         lo.start(clip, anim, rate, false, false, blend_seconds(req, lo.anim, anim, 100.0f), false, req.action_column);
+        lo.corpse = false;
         up.sync_to(lo);
     }
     action = clip;
@@ -222,26 +236,46 @@ bool ActorLayers::step(const LayerRequest& req, float dt) {
         action_on_legs = false;
         legs_took_motion = true;
     }
-    if (legs_free)
-        lo.start(req.base, req.base_anim, req.rate, req.loop, req.reverse,
-                 blend_seconds(req, lo.anim, req.base_anim, req.blend_ms), req.restart, req.base_column);
+    bool started = false;
+    // A corpse that already lies (its clip played through) takes a changed clip at its end too: a new appearance
+    // must not make it fall again.
+    const bool settled = req.corpse && corpse_settled;
+    if (legs_free) {
+        started = lo.start(req.base, req.base_anim, req.rate, req.loop, req.reverse,
+                           blend_seconds(req, lo.anim, req.base_anim, req.blend_ms), req.restart, req.base_column);
+        // Also when the same clip is reused without a restart (a model without D05/D04 plays P01 as its death clip).
+        lo.corpse = req.corpse;
+    }
     if (!action) {
         // Back on the base clip, the upper body takes the legs' position when they play the same
         // (the lower group's SyncToBoneGroup call after both are started).
         if (up.start(req.base, req.base_anim, req.rate, req.loop, req.reverse,
-                     blend_seconds(req, up.anim, req.base_anim, req.blend_ms), req.restart, req.base_column))
+                     blend_seconds(req, up.anim, req.base_anim, req.blend_ms), req.restart, req.base_column)) {
             up.sync_to(lo);
+            started = true;
+        }
+        up.corpse = req.corpse;
     }
     up.advance(dt);
     lo.advance(dt);
+    // A spawn already dead when this state first drew it shows the death clip's last frame at once: the fall is not
+    // played again (a fresh state after a zone change has no memory of the death). One that dies while drawn starts
+    // the clip normally.
+    if (started && req.corpse && (req.corpse_at_end || settled)) {
+        lo.finish();
+        up.finish();
+    }
+    corpse_settled = req.corpse && lo.clip && lo.completed();
     return followed;
 }
 
 bool ActorLayers::split() const {
     const GroupTrack& up = group[game::kUpperBones];
     const GroupTrack& lo = group[game::kLowerBones];
-    return up.clip != lo.clip || up.column != lo.column || up.reverse != lo.reverse || up.time != lo.time || up.previous != lo.previous ||
-           up.blend != lo.blend || (up.previous && up.previous_time != lo.previous_time);
+    return up.clip != lo.clip || up.column != lo.column || up.reverse != lo.reverse || up.time != lo.time ||
+           up.previous != lo.previous || up.blend != lo.blend ||
+           (up.previous && (up.previous_time != lo.previous_time || up.previous_reverse != lo.previous_reverse ||
+                            up.previous_loop != lo.previous_loop));
 }
 
 } // namespace hailstone::render

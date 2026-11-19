@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Corpses no longer play their death animation again when a zone loads: an NPC corpse, or a feign-death spawn, that is already dead when it is first drawn shows its final pose at once, and standing up from feign death blends from that pose instead of the start of the fall. A spawn that dies in front of you still falls as before
 - Lua is now 5.5.1 (was 5.4.7), for the interface packs, plugin windows and MQ-style scripts. A script or add-on that assigns to a `for` loop's variable no longer loads and must copy it into a `local` first; most other 5.4 code runs unchanged
 - Guilds: the Banner page in Modern and Gamepad shows available kits, the active banner and its remaining time. On a server with RoF2 guild banners, members with the appropriate permissions can plant, remove or customise the banner. Planted banners display their guild's patterns and colours.
 - Enchanter pets and other invisible-body spawns (race 127's IVM, also race 600) show the weapon they hold again. The body stays invisible, but the primary and secondary items are drawn in its hands, which move as a wood elf's, as in the original; an aura with nothing held still shows nothing
