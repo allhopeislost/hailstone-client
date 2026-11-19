@@ -5,6 +5,8 @@
 - Item, weapon and augment procs no longer show the spell's casting glow on whoever procs it: they show only the impact on the target, as the original client does. The proc's casting animation stays
 - Corpses no longer play their death animation again when a zone loads: an NPC corpse, or a feign-death spawn, that is already dead when it is first drawn shows its final pose at once, and standing up from feign death blends from that pose instead of the start of the fall. A spawn that dies in front of you still falls as before
 - Corpses no longer play their death animation again when a zone loads: an NPC corpse, or a feign-death spawn, that is already dead when it is first drawn lies in its final pose at once, as on the original client. A spawn that dies in front of you still falls as before
+- Cures no longer remove debuffs locally: a partial or too-weak cure leaves its icon standing until the server's buff fade clears it, instead of making the debuff vanish early
+- Buff icons now show the curse counters as soon as the buff lands and keep showing the remaining count after a partial cure, a server refresh without counter data, or a full buff list that leaves the spell in the same slot
 
 ## 0.7.2-beta (2026-11-19)
 
