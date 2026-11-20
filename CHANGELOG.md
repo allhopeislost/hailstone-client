@@ -9,6 +9,8 @@
 - Choose **Map Pack** directly in the map window in Modern and Gamepad. The selection is saved per character.
 - NPCs renamed by a quest after spawning now show their updated names on nameplates and in the target window.
 - Modern Player frame: right-click and select **Always show cast bar** to keep the frame the same height between casts and songs.
+- The server can now change a spawn's last name while you watch
+  - It shows wherever name plates and the target window show last names, following your name-plate settings, and your own is updated too
 - Item comparison, in both interfaces: an item's tooltip and details window show what wearing it instead of what you wear would change
   - Tooltips cover the inventory, bags, bank, loot, trade and a merchant's goods; the details window covers a linked item too
   - In the details window each stat's change sits beside the item's value (+12 in green beside AC 20, say), with the verdict and what it is compared with above the stats
