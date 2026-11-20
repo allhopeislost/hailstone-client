@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bag windows close when the interface is reloaded with /loadskin
+  - A reload starts a new interface session: no bag is open and the next bag key press opens them again
 - Item comparison, in both interfaces: an item's tooltip and details window show what wearing it instead of what you wear would change
   - Tooltips cover the inventory, bags, bank, loot, trade and a merchant's goods; the details window covers a linked item too
   - In the details window each stat's change sits beside the item's value (+12 in green beside AC 20, say), with the verdict and what it is compared with above the stats
