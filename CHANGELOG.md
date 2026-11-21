@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add-ons can draw on the zone map and the minimap through `hs.UI.map.RegisterOverlay`, whichever add-on's `map.lua` or `minimap.lua` draws the view (docs/ui-api.md "Map overlays")
 - Fixed Horizon Hills scenery protruding through the ground near cliffs in Trakanon's Teeth and at the Stonebrunt waterfall.
 - A GM's /kill now drops you to -10000 HP, as in the original client, until the server next updates your HP (it only played the sound and printed the line)
 - Door clicks use the distance to the spot you clicked, fixing long-range zoning through the Guild Lobby entrance. The Plane of Fire orb in Plane of Tranquility can also be clicked.
