@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Individual Sounds** (Options, Audio, modern interface; a Sounds page in the gamepad interface): a volume from 0 to 100 % for each of nine tiresome sounds, on top of Sound Effects, with a Test button and a reset to 100 %
+  - Own footsteps (steps, jumps, landings), pet footsteps, other footsteps, opening a bag, opening a bank bag, money, thunder, equipping items and creature ambient sounds (spectres and the like)
 - Fixed Horizon Hills scenery protruding through the ground near cliffs in Trakanon's Teeth and at the Stonebrunt waterfall.
 - A GM's /kill now drops you to -10000 HP, as in the original client, until the server next updates your HP (it only played the sound and printed the line)
 - Door clicks use the distance to the spot you clicked, fixing long-range zoning through the Guild Lobby entrance. The Plane of Fire orb in Plane of Tranquility can also be clicked.
