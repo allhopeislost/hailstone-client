@@ -288,6 +288,27 @@ TEST_CASE("Map filters: command state draws spawn marks on every map view") {
     for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kTarget) > 0);
 }
 
+TEST_CASE("Map filters: on and off commands add and remove NPC marks") {
+    MarkerRig r;
+    constexpr ImU32 kNpc = IM_COL32(0x40, 0x40, 0x40, 0);
+    std::vector<std::string> lines;
+    auto command = [&](std::string_view text) {
+        lines.clear();
+        run_map_filter_command(r.filters, text, {}, [&](std::string_view line) { lines.emplace_back(line); });
+    };
+    command("npc off");
+    REQUIRE(lines.size() == 1);
+    CHECK(lines.back() == "NPC is now set to: hide");
+    CHECK(marked_vertices(r.L, kMapDraws[0], kNpc) == 0);
+    command("npc on");
+    CHECK(lines.back() == "NPC is now set to: show");
+    CHECK(marked_vertices(r.L, kMapDraws[0], kNpc) > 0);
+    command("npc off");
+    CHECK(marked_vertices(r.L, kMapDraws[0], kNpc) == 0);
+    command("npc"); // no value still toggles, as MQ2Map does
+    CHECK(marked_vertices(r.L, kMapDraws[0], kNpc) > 0);
+}
+
 TEST_CASE("Map filters: ground objects draw without a full item database") {
     MarkerRig r;
     game::GroundObject object;

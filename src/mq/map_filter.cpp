@@ -512,8 +512,11 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
         if (rest.empty()) {
             filters.set_marker_enabled(true);
             say(std::format("{} is now set to: {}", spec->name, filters.enabled(*filter) ? "show" : "hide"));
-        } else if (iequals(rest, "show") || iequals(rest, "hide")) {
-            filters.set_marker_enabled(iequals(rest, "show"));
+        } else if (iequals(rest, "show") || iequals(rest, "on")) {
+            filters.set_marker_enabled(true);
+            say(std::format("{} is now set to: {}", spec->name, filters.enabled(*filter) ? "show" : "hide"));
+        } else if (iequals(rest, "hide") || iequals(rest, "off")) {
+            filters.set_marker_enabled(false);
             say(std::format("{} is now set to: {}", spec->name, filters.enabled(*filter) ? "show" : "hide"));
         } else {
             const auto type = rest_parts.size() > 0 ? find_map_filter(rest_parts[0]) : std::nullopt;
@@ -552,8 +555,8 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
     // MQ2Map flips the saved bit, not the effective value (All and the parent may still keep it hidden).
     bool enabled = !filters.state(*filter).enabled;
     if (!rest.empty()) {
-        if (iequals(rest, "show")) enabled = true;
-        else if (iequals(rest, "hide")) enabled = false;
+        if (iequals(rest, "show") || iequals(rest, "on")) enabled = true;
+        else if (iequals(rest, "hide") || iequals(rest, "off")) enabled = false;
     }
     filters.set_enabled(*filter, enabled);
     say(std::format("{} is now set to: {}", spec->name, filters.enabled(*filter) ? "show" : "hide"));

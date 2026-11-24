@@ -106,6 +106,14 @@ TEST_CASE("Map filters: /mapfilter toggles, All and requirement messages") {
     // An unknown value toggles, as MQ2Map does.
     run(filters, "npc perhaps");
     CHECK(filters.enabled(MapFilter::Npc));
+    run(filters, "npc off");
+    CHECK_FALSE(filters.state(MapFilter::Npc).enabled);
+    run(filters, "npc on");
+    CHECK(filters.state(MapFilter::Npc).enabled);
+    run(filters, "marker off");
+    CHECK_FALSE(filters.state(MapFilter::Marker).enabled);
+    run(filters, "marker on");
+    CHECK(filters.state(MapFilter::Marker).enabled);
     lines = run(filters, "not-an-option show");
     CHECK(lines.back() == "Usage: /mapfilter [option|help]");
 }

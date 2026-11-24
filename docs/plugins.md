@@ -1017,9 +1017,10 @@ player Find takes ownership back and is not replaced. A ground label uses its ac
 the client has not received an item name; Hailstone does not invent one. `map_spawn` is still asked for every other
 spawn each time a map draws (the minimap: only inside its circle) and shows those it answers for, with a colour, a map
 layer (layer switches and height filter apply) and a label, prefilled from the con colour and name. A Lua plugin's
-`map_spawn(spawn)` answers true for the defaults, or a table with `color`, `layer` and `label`. A server's
-`map_visible` denial wins over both `/mapfilter` and plugin spawn marks; its spawn-only hook does not cover ground
-objects.
+`map_spawn(spawn)` answers true for the defaults, or a table with `color`, `layer` and `label`. Plugin marks are
+independent of `/mapfilter`: hiding a spawn type with `/mapfilter` does not hide a mark supplied by `map_spawn`. A
+server's `map_visible` denial wins over both `/mapfilter` and plugin spawn marks; its spawn-only hook does not cover
+ground objects.
 
 #### Activity, order and compatibility
 
