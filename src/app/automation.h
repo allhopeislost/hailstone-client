@@ -97,8 +97,8 @@ public:
     mq::ScriptHost& scripts();
     const mq::Registry& registry() const;
     const mq::Context& context(); // what the TLOs read now
-    mq::MapFilters& map_filters() { return impl_->map_filters; }
-    const mq::MapFilters& map_filters() const { return impl_->map_filters; }
+    mq::MapFilters& map_filters();
+    const mq::MapFilters& map_filters() const;
     // An owner's capabilities by its tag (plugin::UiBridge::owner_tag): "plugin:<name>" a compiled plugin's while it
     // is loaded, "script:<name>" a running Lua plugin's; 0 otherwise (a bare name too). Its windows in the UI pack act
     // with them (LuaUi::caller_tag).

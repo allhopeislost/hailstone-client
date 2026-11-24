@@ -325,6 +325,8 @@ bool Automation::autoskill_held() {
 }
 const mq::Registry& Automation::registry() const { return impl_->registry; }
 const mq::Context& Automation::context() { return impl_->context(); }
+mq::MapFilters& Automation::map_filters() { return impl_->map_filters; }
+const mq::MapFilters& Automation::map_filters() const { return impl_->map_filters; }
 
 std::optional<plugin::ConsentPrompt> Automation::plugin_consent() const {
     const Impl& m = *impl_;
