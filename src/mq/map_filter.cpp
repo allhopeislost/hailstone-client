@@ -16,6 +16,7 @@
 #include "game/world_state.h"
 #include "mq/spawn_search.h"
 #include "mq/tlo.h"
+#include "net/game_connection.h"
 
 namespace hailstone::mq {
 
@@ -396,6 +397,42 @@ std::string MapFilters::ground_label(const game::GroundObject& object) {
     if (label.size() >= suffix.size() && iequals(std::string_view(label).substr(label.size() - suffix.size()), suffix))
         label.resize(label.size() - suffix.size());
     return label.empty() ? std::string("Ground item") : label;
+}
+
+void update_map_filter_target_path(MapFilters& filters, net::GameConnection& connection,
+                                   MapFilterTargetPathState& state) {
+    const std::uint64_t context = connection.interaction_context();
+    if (state.context != context) state = {};
+
+    const auto& world = connection.world();
+    const auto target = world.spawns.find(world.target_id);
+    const bool enabled = filters.enabled(F::TargetPath) && target != world.spawns.end();
+    if (!enabled) {
+        if (state.owns_path && connection.player_path().kind() == game::FindKind::Spawn &&
+            connection.player_path().target_id() == static_cast<std::int32_t>(state.target))
+            connection.stop_find_path();
+        state = {};
+        return;
+    }
+
+    if (state.target != target->second.id || state.incarnation != target->second.incarnation) {
+        if (state.owns_path && connection.player_path().kind() == game::FindKind::Spawn &&
+            connection.player_path().target_id() == static_cast<std::int32_t>(state.target))
+            connection.stop_find_path();
+        state = {};
+        state.target = target->second.id;
+        state.incarnation = target->second.incarnation;
+    }
+    state.context = context;
+    if (state.owns_path) {
+        if (connection.player_path().kind() != game::FindKind::Spawn ||
+            connection.player_path().target_id() != static_cast<std::int32_t>(state.target))
+            state.owns_path = false;
+        return;
+    }
+    if (state.requested) return;
+    state.requested = true;
+    state.owns_path = connection.find_spawn(state.target);
 }
 
 void run_map_filter_command(MapFilters& filters, std::string_view args, const MapFilterCommandInput& input,

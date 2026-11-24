@@ -54,6 +54,7 @@ struct Automation::Impl {
     mq::Registry registry;
     mq::Context ctx;
     mq::MapFilters map_filters;
+    mq::MapFilterTargetPathState map_filter_target_path;
     std::unique_ptr<mq::Commands> commands;
     std::unique_ptr<mq::ScriptHost> scripts;
     std::unique_ptr<plugin::NativePlugins> plugins;
@@ -349,6 +350,8 @@ void Automation::frame() {
         m.consent_checked = now;
         m.plugins->recheck_consent();
     }
+    if (net::GameConnection* connection = m.conn())
+        mq::update_map_filter_target_path(m.map_filters, *connection, m.map_filter_target_path);
     m.hooks.pulse();
     m.scripts->pulse();
 }

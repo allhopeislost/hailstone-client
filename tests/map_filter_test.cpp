@@ -9,6 +9,7 @@
 #include "game/doors.h"
 #include "game/world_state.h"
 #include "mq/map_filter.h"
+#include "mq_test_world.h"
 #include "scratch_dir.h"
 
 using namespace hailstone;
@@ -237,6 +238,43 @@ TEST_CASE("Map filters: settings round-trip globally and clamp damaged values") 
     CHECK(clamped.state(MapFilter::SpellRadius).radius == 0.0f);
     CHECK(clamped.state(MapFilter::Ground).rgb == 0x9ac9ffu);
     CHECK(clamped.state(MapFilter::Pc).marker_size == 0);
+}
+
+TEST_CASE("Map filters: TargetPath owns only the current target's server path") {
+    mq_test::World world("hailstone_map_filter_target_path");
+    MapFilters filters;
+    filters.set_enabled(MapFilter::Target, true);
+    filters.set_enabled(MapFilter::TargetPath, true);
+    MapFilterTargetPathState state;
+
+    update_map_filter_target_path(filters, *world.conn, state);
+    REQUIRE(state.requested);
+    CHECK(state.owns_path);
+    CHECK(world.conn->player_path().kind() == game::FindKind::Spawn);
+    CHECK(world.conn->player_path().target_id() == 10);
+
+    update_map_filter_target_path(filters, *world.conn, state);
+    CHECK(state.owns_path);
+    CHECK(world.conn->player_path().target_id() == 10);
+
+    net::GameConnectionTestAccess::world(*world.conn).target_id = 12;
+    update_map_filter_target_path(filters, *world.conn, state);
+    CHECK(state.owns_path);
+    CHECK(world.conn->player_path().target_id() == 12);
+
+    // A path the player starts for another purpose takes ownership back.
+    world.conn->find_map_location({100.0f, 0.0f, 0.0f});
+    update_map_filter_target_path(filters, *world.conn, state);
+    CHECK_FALSE(state.owns_path);
+    CHECK(world.conn->player_path().kind() == game::FindKind::MapLocation);
+
+    net::GameConnectionTestAccess::world(*world.conn).target_id = 10;
+    update_map_filter_target_path(filters, *world.conn, state);
+    REQUIRE(state.owns_path);
+    filters.set_enabled(MapFilter::TargetPath, false);
+    update_map_filter_target_path(filters, *world.conn, state);
+    CHECK_FALSE(state.owns_path);
+    CHECK_FALSE(world.conn->player_path().active());
 }
 
 TEST_CASE("Map filters: spawn types, named filtering and target precedence") {

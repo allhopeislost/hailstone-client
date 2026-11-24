@@ -16,6 +16,7 @@
 #include "mq/spawn_search.h"
 
 namespace hailstone::game { struct GuildState; struct GroundObject; struct Spawn; }
+namespace hailstone::net { class GameConnection; }
 
 namespace hailstone::mq {
 
@@ -158,6 +159,19 @@ private:
 struct MapFilterCommandInput {
     const game::GuildState* guild = nullptr;
 };
+
+struct MapFilterTargetPathState {
+    std::uint64_t context = 0;
+    std::uint32_t target = 0;
+    std::uint64_t incarnation = 0;
+    bool requested = false;
+    bool owns_path = false;
+};
+
+// Keep the server find path on the current target while TargetPath is enabled. A path the player starts for another
+// purpose is left alone; disabling the option only stops a path this updater owns.
+void update_map_filter_target_path(MapFilters& filters, net::GameConnection& connection,
+                                   MapFilterTargetPathState& state);
 
 // /mapfilter, help and status. `say` receives one chat line at a time; the caller decides colour and squelch handling.
 void run_map_filter_command(MapFilters& filters, std::string_view args, const MapFilterCommandInput& input,
