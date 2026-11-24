@@ -17,15 +17,8 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
-namespace hailstone::game {
-struct Spawn;
-struct WorldState;
-struct GroupState;
-struct RaidState;
-struct GuildState;
-struct XTargetState;
-enum eSpawnType : int;
-} // namespace hailstone::game
+#include "game/world_state.h"
+
 namespace hailstone::net { class GameConnection; struct FellowshipState; }
 
 namespace hailstone::mq {
