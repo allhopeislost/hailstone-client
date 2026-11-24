@@ -29,6 +29,8 @@
 #include "fuzz_support.h"
 #include "mq_test_world.h"
 #include "scratch_dir.h"
+#include "ui/lua/lua_host.h"
+#include "ui/texture_ids.h"
 
 using namespace hailstone;
 
@@ -57,7 +59,7 @@ int marked_vertices(lua_State* L, const std::string& code, std::optional<ImU32> 
     ImGui::NewFrame();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(600, 500));
-    ImGui::Begin("map");
+    ImGui::Begin("map", nullptr, ImGuiWindowFlags_NoTitleBar);
     if (luaL_dostring(L, code.c_str()) != LUA_OK) {
         FAIL(lua_tostring(L, -1));
         lua_settop(L, 0);
@@ -84,7 +86,7 @@ void draw_prepared(lua_State* L) {
     ImGui::NewFrame();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(600, 500));
-    ImGui::Begin("map");
+    ImGui::Begin("map", nullptr, ImGuiWindowFlags_NoTitleBar);
     if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
         FAIL(lua_tostring(L, -1));
         lua_settop(L, 0);
@@ -98,7 +100,7 @@ struct MarkerFilter final : game::ServerExtension {
     mutable int self_queries = 0, group_queries = 0;
     mutable std::size_t visible_queries = 0;
     std::uint64_t content = 1, life = 1;
-    mutable unsigned policy_queries = 0, lifecycle_queries = 0;
+    mutable unsigned policy_queries = 0, lifecycle_queries = 0, mark_queries = 0;
     std::function<void(const game::Spawn&)> on_visible, on_mark;
     std::function<void()> on_policy, on_lifecycle;
     game::MapPolicy map_policy(const net::GameConnection&) const override {
@@ -125,6 +127,7 @@ struct MarkerFilter final : game::ServerExtension {
     }
     std::optional<game::MapSpawnMark> map_spawn(const net::GameConnection&, const game::Spawn& sp,
                                                const game::MapSpawnMark&) const override {
+        ++mark_queries;
         const auto callback = on_mark;
         if (callback) callback(sp);
         return marks && sp.id == 10 ? std::optional{game::MapSpawnMark{0x123456, 0, "Rat!"}} : std::nullopt;
@@ -137,6 +140,14 @@ const std::array<std::string, 3> kMapDraws = {
     "hs.UI.map.DrawZone(0, 0, 600, 500, 1, 0, 0, true)",
     "hs.UI.map.DrawMinimap(300, 250, 100, 500)"};
 
+struct LiveTexture {
+    const void* id;
+    explicit LiveTexture(const void* value) : id(value) { ui::texture_id_added(id); }
+    ~LiveTexture() { ui::texture_id_removed(id); }
+    LiveTexture(const LiveTexture&) = delete;
+    LiveTexture& operator=(const LiveTexture&) = delete;
+};
+
 struct MarkerRig {
     static net::ConnectionOptions options(std::shared_ptr<game::ServerExtension> extension) {
         net::ConnectionOptions out; out.plugins = std::move(extension); return out;
@@ -148,7 +159,8 @@ struct MarkerRig {
     mq::MapFilters filters;
     std::unique_ptr<app::UiApi> api;
     lua_State* L = nullptr;
-    explicit MarkerRig(std::shared_ptr<game::ServerExtension> extension = {}, bool map_label = false)
+    explicit MarkerRig(std::shared_ptr<game::ServerExtension> extension = {}, bool map_label = false,
+                       bool map_line = false)
         : world("map_marker_filter_world", options(std::move(extension))) {
         context = ImGui::CreateContext();
         ImGui::GetIO().IniFilename = nullptr;
@@ -158,9 +170,11 @@ struct MarkerRig {
         host.map_filters = &filters;
         host.game = world.game.get(); host.conn = world.conn.get(); host.zone_short_name = "qeynos2";
         host.maps_dir = scratch.path() / "maps";
-        if (map_label) {
+        if (map_label || map_line) {
             std::filesystem::create_directories(host.maps_dir);
-            std::ofstream(host.maps_dir / "qeynos2.txt") << "P 0, 0, 0,  255, 255, 0,  1,  Test_Label\n";
+            std::ofstream(host.maps_dir / "qeynos2.txt")
+                << (map_line ? "L -100, 0, 0,  100, 0, 0,  0, 255, 0\n" : "")
+                << (map_label ? "P 0, 0, 0,  255, 255, 0,  1,  Test_Label\n" : "");
         }
         std::ofstream(scratch.path() / "UI.ini") << "[MapViewWnd]\nShowGroup=true\n"
             "GroupColor.red=74\nGroupColor.green=145\nGroupColor.blue=210\n"
@@ -286,6 +300,134 @@ TEST_CASE("Map filters: command state draws spawn marks on every map view") {
     r.filters.set_enabled(mq::MapFilter::Target, true);
     constexpr ImU32 kTarget = IM_COL32(0xc0, 0, 0, 0);
     for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kTarget) > 0);
+}
+
+TEST_CASE("Map filters: vanilla keeps map lines and navigation but no marks or provider calls") {
+    auto filter = std::make_shared<MarkerFilter>();
+    filter->marks = true;
+    MarkerRig r(filter, true, true);
+    constexpr ImU32 kNpc = IM_COL32(0x40, 0x40, 0x40, 0);
+    constexpr ImU32 kTargetLine = IM_COL32(0x80, 0, 0, 0);
+    constexpr ImU32 kRadius = IM_COL32(0x80, 0x80, 0x80, 0);
+    constexpr ImU32 kLabel = IM_COL32(255, 255, 0, 0);
+    constexpr ImU32 kLine = IM_COL32(0, 255, 0, 0);
+    r.filters.set_enabled(mq::MapFilter::Npc, true);
+    r.filters.set_enabled(mq::MapFilter::Target, true);
+    r.filters.set_enabled(mq::MapFilter::TargetLine, true);
+    r.filters.set_radius(mq::MapFilter::TargetRadius, 30.0f);
+    for (std::size_t i = 0; i < kMapDraws.size(); ++i) {
+        CAPTURE(i);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kNpc) > 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kMark & 0x00ffffffu) > 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kGroupRgb) > 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], i == 0 ? kSelfRgb : IM_COL32(255, 255, 255, 0)) > 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kTargetLine) > 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kRadius) > 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kLine) > 0);
+    }
+    CHECK(marked_vertices(r.L, kMapDraws[0], kLabel) > 0);
+    CHECK(marked_vertices(r.L, kMapDraws[1], kLabel) > 0);
+
+    filter->policy_queries = filter->lifecycle_queries = filter->mark_queries = 0;
+    filter->visible_queries = filter->self_queries = filter->group_queries = 0;
+    r.filters.set_vanilla_enabled(true);
+    for (std::size_t i = 0; i < kMapDraws.size(); ++i) {
+        CAPTURE(i);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kNpc) == 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kMark & 0x00ffffffu) == 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kGroupRgb) == 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], i == 0 ? kSelfRgb : IM_COL32(255, 255, 255, 0)) == 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kTargetLine) == 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kRadius) == 0);
+        CHECK(marked_vertices(r.L, kMapDraws[i], kLine) > 0); // the background is still drawn
+    }
+    CHECK(marked_vertices(r.L, kMapDraws[0], kLabel) == 0);
+    CHECK(marked_vertices(r.L, kMapDraws[1], kLabel) == 0);
+    CHECK(filter->policy_queries == 0); // vanilla does not ask map_visible, map_policy or map_spawn
+    CHECK(filter->lifecycle_queries == 0);
+    CHECK(filter->mark_queries == 0);
+    CHECK(filter->visible_queries == 0);
+    CHECK(filter->self_queries == 0);
+    CHECK(filter->group_queries == 0);
+
+    marked_vertices(r.L, "local nx, ny, px, py, k = hs.DrawMinimap(300, 250, 100, 500); "
+                        "nav_minimap = type(nx) == 'number' and type(ny) == 'number' and px ~= nil and k > 0", kLine);
+    marked_vertices(r.L, "local k, mx, my, px, py = hs.DrawZoneMap(0, 0, 600, 500, 1); "
+                        "nav_zone = k > 0 and mx ~= nil and my ~= nil and px ~= nil", kLine);
+    for (const char* name : {"nav_minimap", "nav_zone"}) {
+        lua_getglobal(r.L, name);
+        CHECK(lua_toboolean(r.L, -1));
+        lua_pop(r.L, 1);
+    }
+}
+
+TEST_CASE("Map filters: vanilla hides pack map marks but keeps map frames and controls") {
+    MarkerRig r;
+    ui::lua::register_ui_api(r.L);
+    static int texture = 0;
+    LiveTexture live_texture(&texture);
+    lua_pushlightuserdata(r.L, &texture);
+    lua_setglobal(r.L, "map_texture");
+    constexpr ImU32 kHidden = IM_COL32(1, 2, 3, 0), kVisible = IM_COL32(4, 5, 6, 0),
+                     kControl = IM_COL32(7, 8, 9, 0);
+    const std::string colours =
+        "local hr,hg,hb=1/255,2/255,3/255; local vr,vg,vb=4/255,5/255,6/255; "
+        "local qr,qg,qb=7/255,8/255,9/255; ";
+    const std::string marks =
+        "ui.DrawCircleFilled(300,250,5,hr,hg,hb,1); ui.DrawLine(300,250,500,400,hr,hg,hb,1); "
+        "ui.DrawLine(100,100,200,200,hr,hg,hb,1); ui.DrawText(100,100,hr,hg,hb,1,'mark'); "
+        "ui.DrawText(590,100,hr,hg,hb,1,'a long mark label'); ui.DrawRect(120,120,180,160,hr,hg,hb,1); "
+        "ui.DrawRect(-20,100,620,200,hr,hg,hb,1); ui.DrawCircle(220,140,20,hr,hg,hb,1); "
+        "ui.DrawCircle(350,250,100,hr,hg,hb,1); ui.DrawRectFilled(260,120,300,160,hr,hg,hb,1); "
+        "ui.DrawRectGradient(320,120,360,160,hr,hg,hb,1,hr,hg,hb,1); "
+        "ui.DrawTriangleFilled(380,120,420,120,400,160,hr,hg,hb,1); "
+        "ui.DrawImage(map_texture,440,120,480,160,0,0,1,1,hr,hg,hb,1); ";
+    const std::string minimap_marks =
+        "ui.DrawCircleFilled(300,250,5,hr,hg,hb,1); ui.DrawLine(300,250,350,280,hr,hg,hb,1); "
+        "ui.DrawText(280,220,hr,hg,hb,1,'mark'); ui.DrawRect(270,230,310,250,hr,hg,hb,1); "
+        "ui.DrawRect(-20,100,620,200,hr,hg,hb,1); ui.DrawCircle(320,240,10,hr,hg,hb,1); "
+        "ui.DrawCircle(350,250,100,hr,hg,hb,1); ui.DrawRectFilled(260,220,300,240,hr,hg,hb,1); "
+        "ui.DrawRectGradient(310,220,350,240,hr,hg,hb,1,hr,hg,hb,1); "
+        "ui.DrawTriangleFilled(340,230,360,230,350,250,hr,hg,hb,1); "
+        "ui.DrawImage(map_texture,250,260,280,280,0,0,1,1,hr,hg,hb,1); ";
+    const std::string control =
+        "ui.SetCursorScreenPos(270,235); ui.InvisibleButton('control',60,30); "
+        "ui.DrawRectFilled(270,235,330,265,qr,qg,qb,1); ui.DrawText(280,243,qr,qg,qb,1,'control'); ";
+    const std::array<std::string, 3> draws{
+        "ui.SetCursorScreenPos(0,0); ui.InvisibleButton('map',600,500); hs.UI.map.Draw(0, 0, 600, 500, true); " +
+            colours + marks + control + "ui.DrawRect(0,0,600,500,vr,vg,vb,1); "
+            "ui.DrawRectFilled(650,450,660,460,vr,vg,vb,1)",
+        "ui.SetCursorScreenPos(0,0); ui.InvisibleButton('map',600,500); hs.DrawZoneMap(0, 0, 600, 500, 1); " +
+            colours + marks + control + "ui.DrawRect(0,0,600,500,vr,vg,vb,1); "
+            "ui.DrawRectFilled(650,450,660,460,vr,vg,vb,1)",
+        "ui.SetCursorScreenPos(200,150); ui.InvisibleButton('map',200,200); hs.DrawMinimap(300, 250, 100, 500); " +
+            colours + minimap_marks + control + "ui.DrawCircle(300,250,100,vr,vg,vb,1); "
+            "ui.DrawCircle(300,250,104,vr,vg,vb,1); ui.DrawCircleFilled(300,150,5,vr,vg,vb,1); "
+            "ui.DrawText(296,143,vr,vg,vb,1,'N'); ui.DrawText(300,380,vr,vg,vb,1,'clock')"};
+    for (const auto& draw : draws) {
+        CAPTURE(draw);
+        CHECK(marked_vertices(r.L, draw, kHidden) > 0); // ordinary mode still draws pack marks
+        CHECK(marked_vertices(r.L, draw, kControl) > 0);
+        r.filters.set_vanilla_enabled(true);
+        CHECK(marked_vertices(r.L, draw, kHidden) == 0);
+        CHECK(marked_vertices(r.L, draw, kControl) > 0); // an in-map control keeps drawing
+        CHECK(marked_vertices(r.L, draw, kVisible) > 0); // border, ring, north marker and outside UI remain
+        r.filters.set_vanilla_enabled(false);
+    }
+}
+
+TEST_CASE("Map filters: vanilla guards every map drawn in one frame") {
+    MarkerRig r({}, false, true);
+    ui::lua::register_ui_api(r.L);
+    constexpr ImU32 kMarkRgb = IM_COL32(1, 2, 3, 0);
+    const std::string draw =
+        "ui.SetCursorScreenPos(0,0); ui.InvisibleButton('map-a',200,200); hs.DrawZoneMap(0,0,200,200,1); "
+        "ui.SetCursorScreenPos(300,0); ui.InvisibleButton('map-b',200,200); hs.DrawZoneMap(300,0,500,200,1); "
+        "ui.DrawCircleFilled(100,100,5,1/255,2/255,3/255,1); "
+        "ui.DrawCircleFilled(400,100,5,1/255,2/255,3/255,1)";
+    CHECK(marked_vertices(r.L, draw, kMarkRgb) > 0);
+    r.filters.set_vanilla_enabled(true);
+    CHECK(marked_vertices(r.L, draw, kMarkRgb) == 0);
 }
 
 TEST_CASE("Map filters: on and off commands add and remove NPC marks") {

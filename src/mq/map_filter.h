@@ -134,6 +134,14 @@ public:
     void set_marker(MapFilter filter, MapMarker marker, int size);
     void set_marker_enabled(bool enabled);
 
+    // Hailstone's vanilla mode sits outside MacroQuest's 34 options. The player's choice is shared and persisted;
+    // a server can lock the effective mode on without changing that choice.
+    bool vanilla_enabled() const { return vanilla_enabled_; }
+    bool vanilla_locked() const { return vanilla_locked_; }
+    bool vanilla_mode() const { return vanilla_enabled_ || vanilla_locked_; }
+    void set_vanilla_enabled(bool enabled);
+    void set_vanilla_locked(bool locked);
+
     void set_custom(std::string_view text, const game::GuildState* guild = nullptr);
     void clear_custom();
     bool custom_enabled() const;
@@ -154,6 +162,8 @@ private:
     std::uint64_t revision_ = 0;
     std::optional<std::string> custom_text_;
     std::optional<SpawnSearch> custom_search_;
+    bool vanilla_enabled_ = false;
+    bool vanilla_locked_ = false;
 
     void changed();
     void persist();

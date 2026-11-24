@@ -23,6 +23,7 @@
 - Plugins can ask whether a command exists with the SDK's new `command_exists`. It says whether a plugin, a script or the client added the command, or whether it is one of the game's own.
 - Modern Spell Gems has optional spell names, a background toggle, and resize grips that wrap the tiles into rows and columns. Icon size is adjustable, and existing layouts keep their defaults
 - `/mapfilter` brings MacroQuest's map filters to Hailstone: spawn types, colours, target lines, paths and circles, markers, vectors and custom spawn searches. `on` and `off` work as aliases for `show` and `hide`. The settings are shared by every character; target lines and circles also reach into the minimap from an off-screen target, and TargetPath leaves player-started routes alone without turning or making sounds
+- `/mapfilter vanilla` shows only the map background, without labels, marks, routes or overlays, while navigation keeps working. A server can lock it on with `[map] vanilla = on` in `hailstone.cfg` without changing the player's saved choice
 - Trees with authored collision hulls let players move through their branches while their trunks still block movement. This fixes the invisible walls near the Field of Bone entrance to Warsliks Woods and in other classic zones
 - Decorative slime no longer blocks movement over the Veksar ramp and doorway or through passages in several Lost Dungeons of Norrath layouts
 - Spells that require line of sight now report “You cannot see your target” before casting through a solid door or moving obstacle

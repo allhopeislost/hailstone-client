@@ -36,6 +36,7 @@ struct NoNpcFind final : game::ServerExtension {
 
 TEST_CASE("Map filters: MacroQuest's options, defaults and dependencies") {
     CHECK(map_filter_specs().size() == 34);
+    CHECK_FALSE(find_map_filter("vanilla")); // Hailstone's mode is deliberately outside MacroQuest's options
     CHECK(find_map_filter("all") == MapFilter::All);
     CHECK(find_map_filter("UNTARGETABLE") == MapFilter::Untargetable);
     CHECK_FALSE(find_map_filter("untargettable")); // MQ's command name is Untargetable; the docs' typo is not an alias
@@ -47,6 +48,9 @@ TEST_CASE("Map filters: MacroQuest's options, defaults and dependencies") {
     MapFilters filters;
     CHECK(filters.enabled(MapFilter::All));
     CHECK(filters.enabled(MapFilter::NormalLabels)); // Hailstone keeps its existing map labels by default
+    CHECK_FALSE(filters.vanilla_enabled());
+    CHECK_FALSE(filters.vanilla_locked());
+    CHECK_FALSE(filters.vanilla_mode());
     CHECK_FALSE(filters.enabled(MapFilter::Pc));
     CHECK(filters.state(MapFilter::Pc).rgb == 0xff00ffu);
     CHECK(filters.state(MapFilter::Npc).rgb == 0x404040u);
@@ -123,19 +127,48 @@ TEST_CASE("Map filters: status and help list the available settings") {
     auto lines = run(filters, "");
     REQUIRE(lines.size() > 3);
     CHECK(lines.front() == "Map filtering settings:");
+    CHECK(std::find(lines.begin(), lines.end(), "Vanilla: hide") != lines.end());
     CHECK(std::find(lines.begin(), lines.end(), "All: show") != lines.end());
     CHECK(std::find(lines.begin(), lines.end(), "NormalLabels: show") != lines.end());
 
     lines = run(filters, "help");
-    REQUIRE(lines.size() == 36); // heading, 34 options and the colour hint
+    REQUIRE(lines.size() == 37); // heading, 34 options, vanilla and the colour hint
     CHECK(lines.front() == "Map filtering options:");
     CHECK(std::find(lines.begin(), lines.end(), "TargetRadius #: Sets a circle radius around your target") != lines.end());
+    CHECK(std::find(lines.begin(), lines.end(), "Vanilla: Shows only the map background, without marks or overlays") != lines.end());
     CHECK(lines.back() == "'option' color [r g b]: set its display colour; omit the numbers to reset");
 
     run(filters, "all hide");
     lines = run(filters, "");
     CHECK(std::find(lines.begin(), lines.end(), "All: hide") != lines.end());
     CHECK(std::find(lines.begin(), lines.end(), "PC: show") == lines.end());
+}
+
+TEST_CASE("Map filters: vanilla is a persistent client choice with a separate server lock") {
+    MapFilters filters;
+    auto lines = run(filters, "vanilla");
+    REQUIRE(lines.size() == 1);
+    CHECK(lines.back() == "Vanilla is now set to: show");
+    CHECK(filters.vanilla_enabled());
+    CHECK(filters.vanilla_mode());
+    run(filters, "vanilla off");
+    CHECK_FALSE(filters.vanilla_enabled());
+    CHECK_FALSE(filters.vanilla_mode());
+    run(filters, "vanilla perhaps"); // an unknown value toggles, like the other switches
+    CHECK(filters.vanilla_enabled());
+
+    filters.set_vanilla_locked(true);
+    CHECK(filters.vanilla_locked());
+    lines = run(filters, "vanilla hide");
+    REQUIRE(lines.size() == 2);
+    CHECK(lines.front() == "Vanilla is now set to: hide");
+    CHECK(lines.back() == "This server keeps vanilla mode on.");
+    CHECK_FALSE(filters.vanilla_enabled()); // the lock does not overwrite the saved choice
+    CHECK(filters.vanilla_mode());
+    lines = run(filters, "");
+    CHECK(std::find(lines.begin(), lines.end(), "Vanilla: show (server)") != lines.end());
+    filters.set_vanilla_locked(false);
+    CHECK_FALSE(filters.vanilla_mode());
 }
 
 TEST_CASE("Map filters: colours clamp, reset and refuse options without a colour") {
@@ -234,7 +267,8 @@ TEST_CASE("Map filters: settings round-trip globally and clamp damaged values") 
                  "mapfilter.NPC.marker=Diamond\n"
                  "mapfilter.NPC.marker-size=9\n"
                  "mapfilter.Marker.enabled=1\n"
-                 "mapfilter.NormalLabels.enabled=0\n");
+                 "mapfilter.NormalLabels.enabled=0\n"
+                 "mapfilter.Vanilla.enabled=1\n");
     MapFilters filters(&config);
     CHECK(filters.enabled(MapFilter::Pc));
     CHECK(filters.state(MapFilter::Pc).rgb == 0x1e240u);
@@ -243,6 +277,8 @@ TEST_CASE("Map filters: settings round-trip globally and clamp damaged values") 
     CHECK(filters.state(MapFilter::Npc).marker == MapMarker::Diamond);
     CHECK(filters.state(MapFilter::Npc).marker_size == 9);
     CHECK_FALSE(filters.enabled(MapFilter::NormalLabels));
+    CHECK(filters.vanilla_enabled());
+    CHECK(filters.vanilla_mode());
 
     filters.set_color(MapFilter::Target, 0xabcdef);
     filters.set_radius(MapFilter::TargetRadius, 75.0f);
@@ -253,7 +289,10 @@ TEST_CASE("Map filters: settings round-trip globally and clamp damaged values") 
     CHECK(restored.state(MapFilter::Target).rgb == 0xabcdefu);
     CHECK(restored.state(MapFilter::TargetRadius).radius == 75.0f);
     CHECK(restored.state(MapFilter::Npc).marker == MapMarker::Diamond);
+    CHECK(restored.state(MapFilter::Npc).marker_size == 9);
+    CHECK(restored.vanilla_enabled());
     CHECK(Config::is_shared_key("mapfilter.PC.enabled"));
+    CHECK(Config::is_shared_key("mapfilter.Vanilla.enabled"));
 
     Config damaged;
     damaged.parse("mapfilter.SpellRadius.radius=nan\n"
@@ -276,6 +315,7 @@ TEST_CASE("Map filters: TargetPath is silent and yields to player-started paths"
     MapFilters filters;
     filters.set_enabled(MapFilter::Target, true);
     filters.set_enabled(MapFilter::TargetPath, true);
+    filters.set_vanilla_enabled(true); // navigation still runs when its line is hidden
     MapFilterTargetPathState state;
     (void)conn.take_sound_cues();
 

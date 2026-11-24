@@ -120,6 +120,7 @@ struct Automation::Impl {
         } else {
             policy.clear();
         }
+        map_filters.set_vanilla_locked(has && c->server_rules()->map_vanilla);
         // The server's scripts and plugins are looked for first (servers/<profile>/scripts and plugins).
         // Out of the world (character select, a login, disconnected): the character's autorun list goes until a
         // character's zone-in sets it again (ClientApp's zone-in).

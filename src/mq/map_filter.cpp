@@ -204,6 +204,7 @@ void MapFilters::load(Config& config) {
     states_[index_of(F::Custom)].enabled = false; // MQ2Map does not persist a custom search
     custom_text_.reset();
     custom_search_.reset();
+    vanilla_enabled_ = config.get_bool("mapfilter.Vanilla.enabled", false);
 }
 
 void MapFilters::save(Config& config) const {
@@ -216,6 +217,7 @@ void MapFilters::save(Config& config) const {
         if (state.marker_size != 0) config.set_int(key(spec.name, "marker-size"), state.marker_size);
         else config.erase(key(spec.name, "marker-size"));
     }
+    config.set_bool("mapfilter.Vanilla.enabled", vanilla_enabled_);
 }
 
 bool MapFilters::enabled(MapFilter filter) const {
@@ -298,6 +300,18 @@ void MapFilters::set_marker_enabled(bool enabled) {
     if (option_state.enabled == enabled) return;
     option_state.enabled = enabled;
     changed();
+}
+
+void MapFilters::set_vanilla_enabled(bool enabled) {
+    if (vanilla_enabled_ == enabled) return;
+    vanilla_enabled_ = enabled;
+    changed();
+}
+
+void MapFilters::set_vanilla_locked(bool locked) {
+    if (vanilla_locked_ == locked) return;
+    vanilla_locked_ = locked;
+    ++revision_; // the server's lock changes the effective mode, but is never saved as the player's choice
 }
 
 void MapFilters::set_custom(std::string_view text, const game::GuildState* guild) {
@@ -449,6 +463,8 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
     if (args.empty()) {
         say("Map filtering settings:");
         say("-----------------------");
+        say(std::format("Vanilla: {}{}", filters.vanilla_mode() ? "show" : "hide",
+                        filters.vanilla_locked() ? " (server)" : ""));
         for (const auto& spec : kSpecs)
             if (filters.requirements_met(spec.filter)) status_line(filters, spec.filter, say);
         return;
@@ -459,7 +475,18 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
         say("Map filtering options:");
         for (const auto& spec : kSpecs)
             say(std::format("{}{}: {}", spec.name, is_toggle(spec) ? "" : " #", spec.help));
+        say("Vanilla: Shows only the map background, without marks or overlays");
         say("'option' color [r g b]: set its display colour; omit the numbers to reset");
+        return;
+    }
+    if (iequals(option_word, "vanilla")) {
+        bool enabled = !filters.vanilla_enabled();
+        const std::string_view rest = rest_after(args, 1);
+        if (iequals(rest, "show") || iequals(rest, "on")) enabled = true;
+        else if (iequals(rest, "hide") || iequals(rest, "off")) enabled = false;
+        filters.set_vanilla_enabled(enabled);
+        say(std::format("Vanilla is now set to: {}", enabled ? "show" : "hide"));
+        if (filters.vanilla_locked()) say("This server keeps vanilla mode on.");
         return;
     }
     const auto filter = find_map_filter(option_word);

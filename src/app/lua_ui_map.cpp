@@ -70,6 +70,7 @@
 #include "net/game_connection.h"
 #include "plugin/lua_keep.h"
 #include "ui/dev_screens.h"
+#include "ui/lua/lua_draw_scope.h"
 #include "ui/lua/lua_host.h"
 #include "ui/ui_ini.h"
 
@@ -1263,7 +1264,7 @@ void add_filter_geometry(const net::GameConnection& connection, const mq::MapFil
 MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, bool show_group, bool show_custom,
                        const std::function<bool(const glm::vec3&)>& in_view = {}) {
     static thread_local bool collecting = false;
-    if (!h.conn || collecting) return {};
+    if (!h.conn || collecting || (h.map_filters && h.map_filters->vanilla_mode())) return {};
     collecting = true;
     struct Finish { ~Finish() { collecting = false; } } finish;
     try {
@@ -1519,6 +1520,7 @@ int DrawMap(lua_State* L) {
     v.precalc(me ? std::optional<glm::vec2>(glm::vec2(*me)) : std::nullopt, s.label_box(h), s.find_box(h));
     auto T = [&](float x, float y) { return v.transform(x, y, cw, ch); };
     bool edit = s.edit_mode();
+    const bool vanilla = h.map_filters && h.map_filters->vanilla_mode();
     const bool normal_labels = !h.map_filters || h.map_filters->enabled(mq::MapFilter::NormalLabels);
     const bool labels_visible = normal_labels || edit; // the editor needs the labels it edits
     auto draw_filtered_mark = [&](const auto& mk, bool show_label) {
@@ -1551,6 +1553,19 @@ int DrawMap(lua_State* L) {
         v.place_labels(cw, ch, 0, 0, static_cast<int>(cw), static_cast<int>(ch));
         v.relayout_zoom = v.zoom;
         v.relayout = false;
+    }
+
+    // Vanilla keeps the map's lines and its mouse mapping, but no labels, paths, marks or editor overlays. The Lua
+    // guard also hides marks the pack draws after this call, while leaving the frame around the map alone.
+    if (vanilla) {
+        for (auto& l : v.lines) {
+            if (!v.line_shown(l, feet)) continue;
+            glm::vec2 a = T(l.start.x, l.start.y), b = T(l.end.x, l.end.y);
+            line(a.x, a.y, b.x, b.y, faded(color(l.color), v.z_fade(l.start.z, l.end.z, feet)));
+        }
+        ui::lua::suppress_map_draws(dl, ImVec2(x0, y0), ImVec2(x1, y1));
+        dl->PopClipRect();
+        return 0;
     }
 
     // Hover: a group member within 5 pixels first; else the nearest label within 20 and, editing, the nearest line
@@ -1874,6 +1889,7 @@ void draw_zone_view(MapState& s, UiHost& h, const ZoneView& zv) {
     // Another zone's map (an atlas zone link, hs.ShowZoneMap) is drawn without the player, the find path and the
     // height fade, which belong to the player's zone.
     auto feet = v.current_zone ? s.feet_z(h) : std::nullopt;
+    const bool vanilla = h.map_filters && h.map_filters->vanilla_mode();
     const bool normal_labels = !h.map_filters || h.map_filters->enabled(mq::MapFilter::NormalLabels);
     const glm::vec2 here = zv.P(me->x, me->y);
     // The minimap's square: in a busy zone's thousands of lines, most are outside it.
@@ -1883,13 +1899,15 @@ void draw_zone_view(MapState& s, UiHost& h, const ZoneView& zv) {
                                 std::max(a.y, b.y) < zv.reach_from.y - reach || std::min(a.y, b.y) > zv.reach_from.y + reach);
     };
     auto in_circle = [&](const glm::vec3& m) { return inside(zv.P(m.x, m.y)); };
-    const auto markers = v.current_zone
+    const auto markers = !vanilla && v.current_zone
         ? map_markers(h, h.map_filters, v.active_layer, v.show_group, true,
                       r > 0.0f ? std::function<bool(const glm::vec3&)>(in_circle) : nullptr)
         : MapMarkers{};
     for (const auto& l : v.lines)
         if (!out_of_reach(l.start, l.end) && v.line_shown(l, feet))
             seg(zv.P(l.start.x, l.start.y), zv.P(l.end.x, l.end.y), faded(ink(l.color), v.z_fade(l.start.z, l.end.z, feet)), w);
+    lap.mark("map view lines");
+    if (vanilla) return;
     if (v.line_active) seg(zv.P(v.current_point.x, v.current_point.y), here, ink(v.current_color), w);
     if (v.layer_shown(markers.layer)) {
         for (const auto& overlay : markers.lines) {
@@ -2046,6 +2064,7 @@ int DrawMinimap(lua_State* L) {
     const float r = static_cast<float>(luaL_checknumber(L, 3));
     const float range = std::max(1.0f, static_cast<float>(luaL_checknumber(L, 4)));
     const bool rotate = lua_toboolean(L, 5) != 0;
+    const bool vanilla = h.map_filters && h.map_filters->vanilla_mode();
     // Map coordinates are screen-aligned (x right, y down, world_to_map); the heading turns counter-clockwise from
     // north, so turning the map by it puts the facing up.
     const float hd = rotate ? h.heading : 0.0f;
@@ -2067,6 +2086,7 @@ int DrawMinimap(lua_State* L) {
     zv.reach = range; // the circle's radius r is `range` map units, however the map turns
     zv.reach_from = glm::vec2(me->x, me->y);
     draw_zone_view(s, h, zv);
+    if (vanilla) ui::lua::suppress_map_draws(ImGui::GetWindowDrawList(), zv.c, r);
     MapOverlayView overlay;
     overlay.minimap = true;
     overlay.x0 = cx - r; overlay.y0 = cy - r; overlay.x1 = cx + r; overlay.y1 = cy + r;
@@ -2080,7 +2100,7 @@ int DrawMinimap(lua_State* L) {
     if (overlay.have_player) { overlay.player_x = me->x; overlay.player_y = me->y; }
     overlay.zone = s.zone;
     overlay.current_zone = s.view.current_zone;
-    dispatch_map_overlays(L, overlay);
+    if (!vanilla) dispatch_map_overlays(L, overlay);
     lua_pushnumber(L, me->x);
     lua_pushnumber(L, me->y);
     lua_pushnumber(L, k);
@@ -2098,6 +2118,7 @@ int DrawZoneMap(lua_State* L) {
     const float x1 = static_cast<float>(luaL_checknumber(L, 3)), y1 = static_cast<float>(luaL_checknumber(L, 4));
     const float zoom = std::max(0.1f, static_cast<float>(luaL_checknumber(L, 5)));
     const auto& v = s.view;
+    const bool vanilla = h.map_filters && h.map_filters->vanilla_mode();
     if (!h.in_game || x1 <= x0 || y1 <= y0) return 0;
     auto feet = s.feet_z(h);
     glm::vec2 lo(FLT_MAX), hi(-FLT_MAX);
@@ -2132,6 +2153,7 @@ int DrawZoneMap(lua_State* L) {
     zv.P = [&](float x, float y) { return glm::vec2((x - cx) * k, (y - cy) * k); };
     ImGui::GetWindowDrawList()->PushClipRect(ImVec2(x0, y0), ImVec2(x1, y1), true);
     draw_zone_view(s, h, zv);
+    if (vanilla) ui::lua::suppress_map_draws(ImGui::GetWindowDrawList(), ImVec2(x0, y0), ImVec2(x1, y1));
     MapOverlayView overlay;
     overlay.minimap = false;
     overlay.x0 = x0; overlay.y0 = y0; overlay.x1 = x1; overlay.y1 = y1;
@@ -2143,7 +2165,7 @@ int DrawZoneMap(lua_State* L) {
     if (overlay.have_player) { overlay.player_x = me->x; overlay.player_y = me->y; }
     overlay.zone = s.zone;
     overlay.current_zone = s.view.current_zone;
-    dispatch_map_overlays(L, overlay);
+    if (!vanilla) dispatch_map_overlays(L, overlay);
     ImGui::GetWindowDrawList()->PopClipRect();
     return out;
 }

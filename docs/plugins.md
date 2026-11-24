@@ -1018,9 +1018,9 @@ the client has not received an item name; Hailstone does not invent one. `map_sp
 spawn each time a map draws (the minimap: only inside its circle) and shows those it answers for, with a colour, a map
 layer (layer switches and height filter apply) and a label, prefilled from the con colour and name. A Lua plugin's
 `map_spawn(spawn)` answers true for the defaults, or a table with `color`, `layer` and `label`. Plugin marks are
-independent of `/mapfilter`: hiding a spawn type with `/mapfilter` does not hide a mark supplied by `map_spawn`. A
-server's `map_visible` denial wins over both `/mapfilter` and plugin spawn marks; its spawn-only hook does not cover
-ground objects.
+independent of `/mapfilter`: hiding a spawn type with `/mapfilter` does not hide a mark supplied by `map_spawn`.
+Vanilla mode is the exception: it hides every map mark and does not call `map_spawn`. A server's `map_visible` denial
+wins over both `/mapfilter` and plugin spawn marks; its spawn-only hook does not cover ground objects.
 
 #### Activity, order and compatibility
 
@@ -2167,6 +2167,10 @@ faces = on                ; button faces (default on)
 autoskill = on            ; the Ability Book's autoskill (default on). Off: its switch is greyed out and a
                           ; running autoskill stops
 
+[map]
+vanilla = off            ; only the map background, without labels, marks, routes or overlays (default off).
+                          ; Navigation keeps working; the minimap's ring, north marker, controls and clock stay
+
 [movement]
 npc_collision = on        ; live NPCs stop the player, who slides along them (default on, with or without this
                           ; file). Off: everyone walks through everyone, as in the original client
@@ -2186,6 +2190,17 @@ suggest = owner/repo      ; add-ons the login screen suggests to players who do 
                           ; between; docs/addons.md "Suggested add-ons"). They come with this file, so at the
                           ; first zone-in: Hailstone's add-on index is how a first-time player hears of one
 ```
+
+#### Vanilla maps
+
+`[map] vanilla = on` makes the map window, zone map and minimap show only their background lines. Labels, player and
+group marks, `/mapfilter` marks, pins, routes, paths, target overlays, plugin spawn marks and registered map overlays
+are hidden. The Lua packs keep their map frames, minimap ring, north marker, zoom controls and clocks. Map panning,
+Find, TargetPath and other navigation keep working; only their drawn lines and markers disappear.
+
+The player's `/mapfilter vanilla` setting is shared by every character and saved in `hailstone.ini`. The server rule
+locks the effective mode on without overwriting that saved choice. With no rule, or `vanilla = off`, the player's
+choice decides. This is client-side and advisory: a modified client can ignore `hailstone.cfg`.
 
 #### Autoskill
 
