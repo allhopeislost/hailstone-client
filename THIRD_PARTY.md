@@ -147,7 +147,9 @@ files in MacroQuest's repository.
   Hailstone; none is copied.
 - `src/mq/map_filter.cpp`: the `/mapfilter` option names, defaults, colours, dependencies, radius and marker rules
   follow MacroQuest's `src/plugins/map/MQ2Map.cpp`, `MQ2MapCommands.cpp`, `MQ2MapAPI.cpp` and `MapObject.cpp`. The
-  implementation was written for Hailstone; none is copied.
+  emulator branch at `f4b77136` has the same option set and rendering; its colour command modifies a copy and only
+  takes effect after reload. That bug is deliberately not reproduced. The implementation was written for Hailstone;
+  none is copied.
 - `src/mq/calc.cpp` (Calculate, FastCalculate, EvaluateRPN, GetArg, GetIntFromString in `MQ2Utilities.cpp` and
   `include/mq/base/String.h`), and the `Math`, `If` and `Range` TLOs and the int, float and string members in
   `src/mq/tlo.cpp` and `src/mq/tlo_game.cpp` (`MQ2MathType.cpp`, `MQ2Data.cpp`, `MQ2BasicTypes.cpp`): written for

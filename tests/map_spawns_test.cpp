@@ -271,6 +271,39 @@ TEST_CASE("Map filters: ground objects draw without a full item database") {
     for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kGround) > 0);
 }
 
+TEST_CASE("Map filters: vectors, markers and target overlays draw on every map view") {
+    MarkerRig r;
+    r.filters.set_enabled(mq::MapFilter::Npc, true);
+    r.filters.set_color(mq::MapFilter::Npc, 0x123456);
+    constexpr ImU32 kNpc = IM_COL32(0x12, 0x34, 0x56, 0);
+    int baseline = 0;
+    for (const auto& draw : kMapDraws) baseline = std::max(baseline, marked_vertices(r.L, draw, kNpc));
+    REQUIRE(baseline > 0);
+
+    r.filters.set_enabled(mq::MapFilter::Vector, true);
+    std::array<int, kMapDraws.size()> vector_counts{};
+    for (std::size_t i = 0; i < kMapDraws.size(); ++i) vector_counts[i] = marked_vertices(r.L, kMapDraws[i], kNpc);
+    for (int count : vector_counts) REQUIRE(count > baseline);
+    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Square, 20);
+    for (std::size_t i = 0; i < kMapDraws.size(); ++i)
+        CHECK(marked_vertices(r.L, kMapDraws[i], kNpc) > vector_counts[i]);
+
+    r.filters.set_enabled(mq::MapFilter::Target, true);
+    r.filters.set_enabled(mq::MapFilter::TargetLine, true);
+    constexpr ImU32 kTargetLine = IM_COL32(0x80, 0, 0, 0);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kTargetLine) > 0);
+    r.filters.set_radius(mq::MapFilter::TargetRadius, 30.0f);
+    constexpr ImU32 kRadius = IM_COL32(0x80, 0x80, 0x80, 0);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kRadius) > 0);
+    r.filters.set_radius(mq::MapFilter::TargetRadius, 0.0f);
+    r.filters.set_enabled(mq::MapFilter::TargetMelee, true);
+    constexpr ImU32 kMelee = IM_COL32(0xff, 0x80, 0x80, 0);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kMelee) > 0);
+    r.filters.set_enabled(mq::MapFilter::TargetMelee, false);
+    r.filters.set_radius(mq::MapFilter::CastRadius, 40.0f);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kRadius) > 0);
+}
+
 TEST_CASE("Map filters: server marker denial wins over command filters") {
     auto filter = std::make_shared<MarkerFilter>();
     MarkerRig r(filter);

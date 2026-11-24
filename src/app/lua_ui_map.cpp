@@ -57,6 +57,7 @@
 #include "game/doors.h"
 #include "game/map_data.h"
 #include "game/map_files.h"
+#include "game/mechanics/abilities.h"
 #include "game/mechanics/character.h"
 #include "game/sine_table.h"
 #include "game/slash_commands.h"
@@ -1124,6 +1125,8 @@ struct FilteredSpawn {
     game::Spawn spawn;
     game::MapSpawnMark mark;
     glm::vec3 at{0.0f};
+    mq::MapFilter marker_filter = mq::MapFilter::Invalid;
+    bool target = false;
 };
 struct GroundMark {
     std::uint32_t drop_id = 0;
@@ -1131,12 +1134,127 @@ struct GroundMark {
     game::MapSpawnMark mark;
     glm::vec3 at{0.0f};
 };
+struct MapFilterLine {
+    glm::vec3 start{0.0f}, end{0.0f};
+    std::uint32_t rgb = 0;
+};
+struct MapFilterCircle {
+    glm::vec3 center{0.0f};
+    float radius = 0.0f;
+    std::uint32_t rgb = 0;
+};
 struct MapMarkers {
     std::vector<GroupSpawn> group;
     std::vector<SpawnMark> custom;
     std::vector<FilteredSpawn> filtered;
     std::vector<GroundMark> ground;
+    std::vector<MapFilterLine> lines;
+    std::vector<MapFilterCircle> circles;
+    int layer = 0;
 };
+
+constexpr int kMapCircleSegments = 36;
+constexpr float kMapDegreesToRadians = glm::pi<float>() / 180.0f;
+constexpr float kMapCircleStep = 360.0f / static_cast<float>(kMapCircleSegments);
+constexpr float kMapVectorLength = 4.0f;
+constexpr float kMapDiamondScale = 0.71f;
+constexpr float kMapTriangleRadiusScale = 0.8660254037844386f; // MQ2Map: size * 1.5 * sqrt(3) / 3
+constexpr float kMapTriangleSideOneDegrees = 210.0f;
+constexpr float kMapTriangleSideTwoDegrees = 330.0f;
+constexpr int kMapRingSegments = 8;
+constexpr float kMapRingStartDegrees = 22.5f;
+constexpr float kMapRingStepDegrees = 45.0f;
+
+void append_map_marker(std::vector<MapFilterLine>& lines, glm::vec3 center, mq::MapMarker shape, int size,
+                       float heading, std::uint32_t rgb) {
+    if (shape == mq::MapMarker::None) return;
+    const float side = static_cast<float>(std::max(size, mq::kMapFilterDefaultMarkerSize));
+    const auto add = [&](glm::vec2 a, glm::vec2 b) {
+        lines.push_back({center + glm::vec3(a, 0.0f), center + glm::vec3(b, 0.0f), rgb});
+    };
+    if (shape == mq::MapMarker::Square) {
+        const float h = side * 0.5f;
+        add({-h, -h}, {h, -h});
+        add({h, -h}, {h, h});
+        add({h, h}, {-h, h});
+        add({-h, h}, {-h, -h});
+    } else if (shape == mq::MapMarker::Diamond) {
+        const float d = side * kMapDiamondScale;
+        add({0, -d}, {d, 0});
+        add({d, 0}, {0, d});
+        add({0, d}, {-d, 0});
+        add({-d, 0}, {0, -d});
+    } else if (shape == mq::MapMarker::Triangle) {
+        const float angle = game::heading_to_yaw(heading);
+        const float radius = side * kMapTriangleRadiusScale;
+        const glm::vec2 a(-std::sin(angle) * radius, -std::cos(angle) * radius);
+        const float a1 = angle + kMapTriangleSideOneDegrees * kMapDegreesToRadians;
+        const float a2 = angle + kMapTriangleSideTwoDegrees * kMapDegreesToRadians;
+        const glm::vec2 b(-std::sin(a1) * radius, -std::cos(a1) * radius);
+        const glm::vec2 c(std::sin(a2) * radius, std::cos(a2) * radius);
+        add(a, b);
+        add(b, c);
+        add(c, a);
+    } else if (shape == mq::MapMarker::Ring) {
+        for (int i = 0; i < kMapRingSegments; ++i) {
+            const float a = (kMapRingStartDegrees + static_cast<float>(i) * kMapRingStepDegrees) * kMapDegreesToRadians;
+            const float b = (kMapRingStartDegrees + static_cast<float>(i + 1) * kMapRingStepDegrees) * kMapDegreesToRadians;
+            add({std::sin(a) * side, std::cos(a) * side}, {std::sin(b) * side, std::cos(b) * side});
+        }
+    }
+}
+
+game::mechanics::SkillActor map_melee_actor(const game::Spawn& spawn) {
+    game::mechanics::SkillActor actor;
+    actor.melee_radius = spawn.melee_radius;
+    actor.scale = spawn.heights.model_scale;
+    actor.avatar_height = spawn.heights.avatar_height;
+    return actor;
+}
+
+void add_filter_geometry(const net::GameConnection& connection, const mq::MapFilters& filters, MapMarkers& markers) {
+    if (!filters.enabled(mq::MapFilter::All)) return;
+    for (const auto& spawn : markers.filtered) {
+        if (filters.enabled(mq::MapFilter::Vector)) {
+            glm::vec2 delta;
+            if (spawn.spawn.speed_run > 0.0f) {
+                const glm::vec3 velocity = game::world_to_server(spawn.spawn.velocity);
+                delta = {-velocity.x, -velocity.y};
+            } else {
+                const float angle = game::heading_to_yaw(spawn.spawn.heading);
+                delta = {-std::sin(angle), -std::cos(angle)};
+            }
+            if (glm::dot(delta, delta) > 0.0f)
+                markers.lines.push_back({spawn.at, spawn.at + glm::vec3(delta * kMapVectorLength, 0.0f), spawn.mark.rgb});
+        }
+        if (filters.enabled(mq::MapFilter::Marker)) {
+            const auto& state = filters.state(spawn.marker_filter);
+            append_map_marker(markers.lines, spawn.at, state.marker, state.marker_size, spawn.spawn.heading, spawn.mark.rgb);
+        }
+    }
+
+    const game::Spawn* player = connection.world().player();
+    if (!player) return;
+    const glm::vec3 me = game::world_to_map(mq::spawn_position(*player));
+    auto circle = [&](mq::MapFilter filter, glm::vec3 center, float radius) {
+        if (radius <= 0.0f) return;
+        markers.circles.push_back({center, radius, filters.state(filter).rgb});
+    };
+    if (filters.enabled(mq::MapFilter::CastRadius)) circle(mq::MapFilter::CastRadius, me, filters.state(mq::MapFilter::CastRadius).radius);
+    if (filters.enabled(mq::MapFilter::SpellRadius)) circle(mq::MapFilter::SpellRadius, me, filters.state(mq::MapFilter::SpellRadius).radius);
+
+    const auto target = std::find_if(markers.filtered.begin(), markers.filtered.end(),
+                                     [](const FilteredSpawn& spawn) { return spawn.target; });
+    if (target == markers.filtered.end()) return;
+    if (filters.enabled(mq::MapFilter::TargetLine))
+        markers.lines.push_back({me, target->at, filters.state(mq::MapFilter::TargetLine).rgb});
+    if (filters.enabled(mq::MapFilter::TargetRadius))
+        circle(mq::MapFilter::TargetRadius, target->at, filters.state(mq::MapFilter::TargetRadius).radius);
+    if (filters.enabled(mq::MapFilter::TargetMelee)) {
+        const auto a = map_melee_actor(*player), b = map_melee_actor(target->spawn);
+        circle(mq::MapFilter::TargetMelee, target->at, game::mechanics::melee_range(&a, &b));
+    }
+}
 
 // Collect every marker source before drawing. Providers may synchronously change the world, roster or their own
 // permissions: only owned values and issued actor references cross those calls. The local player's direct marker
@@ -1204,6 +1322,7 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             return c.world().spawns.at(actor.id);
         };
         MapMarkers out;
+        out.layer = active_layer;
         for (const auto& actor : actors) {
             auto sp = copy(actor);
             if (!sp) continue;
@@ -1252,7 +1371,7 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
                 m.rgb = filtered->rgb;
                 m.layer = active_layer;
                 m.label = std::move(filtered->label);
-                out.filtered.push_back({actor, *sp, std::move(m), spawn_map(*sp)});
+                out.filtered.push_back({actor, *sp, std::move(m), spawn_map(*sp), filtered->marker_filter, filtered->target});
             }
             if (mark && (!in_view || in_view(spawn_map(*sp))))
                 out.custom.push_back({actor, std::move(*mark), spawn_map(*sp)});
@@ -1309,6 +1428,8 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             if (!mark) return true;
             f.mark.rgb = mark->rgb;
             f.mark.label = std::move(mark->label);
+            f.marker_filter = mark->marker_filter;
+            f.target = mark->target;
             return in_view && !in_view(f.at);
         });
         std::erase_if(out.ground, [&](GroundMark& g) {
@@ -1320,6 +1441,7 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             g.mark.label = mq::MapFilters::ground_label(g.object);
             return in_view && !in_view(g.at);
         });
+        if (filters) add_filter_geometry(c, *filters, out);
         return out;
     } catch (...) {
         // A failing provider cannot unwind through a Lua draw entrypoint or turn a failed filter into allowance.
@@ -1508,6 +1630,28 @@ int DrawMap(lua_State* L) {
     if (v.line_active && me) {
         glm::vec2 a = T(v.current_point.x, v.current_point.y), b = T(me->x, me->y);
         line(a.x, a.y, b.x, b.y, color(v.current_color));
+    }
+    // /mapfilter's vectors, markers and target line, then its radius circles.
+    if (v.layer_shown(markers.layer)) {
+        for (const auto& overlay : markers.lines) {
+            if (v.z_filter && feet) {
+                const float low = *feet - static_cast<float>(v.min_z), high = *feet + static_cast<float>(v.max_z);
+                if (std::max(overlay.start.z, overlay.end.z) < low || std::min(overlay.start.z, overlay.end.z) > high) continue;
+            }
+            glm::vec2 a = T(overlay.start.x, overlay.start.y), b = T(overlay.end.x, overlay.end.y);
+            line(a.x, a.y, b.x, b.y, faded(color(overlay.rgb, 0xff), v.z_fade(overlay.start.z, overlay.end.z, feet)));
+        }
+        for (const auto& circle : markers.circles) {
+            if (v.z_filter && feet && (circle.center.z < *feet - v.min_z || circle.center.z > *feet + v.max_z)) continue;
+            const ImU32 col = faded(color(circle.rgb, 0xff), v.z_fade(circle.center.z, feet));
+            for (int i = 0; i < kMapCircleSegments; ++i) {
+                const float a = static_cast<float>(i) * kMapCircleStep * kMapDegreesToRadians;
+                const float b = static_cast<float>(i + 1) * kMapCircleStep * kMapDegreesToRadians;
+                const glm::vec2 p = T(circle.center.x + std::cos(a) * circle.radius, circle.center.y + std::sin(a) * circle.radius);
+                const glm::vec2 q = T(circle.center.x + std::cos(b) * circle.radius, circle.center.y + std::sin(b) * circle.radius);
+                line(p.x, p.y, q.x, q.y, col);
+            }
+        }
     }
     // The find path, from the player to its last point and on to the destination, with an X there; else a failed
     // find's X; else the selected label's X. The path and the failed X only on the player's zone.
@@ -1728,10 +1872,39 @@ void draw_zone_view(MapState& s, UiHost& h, const ZoneView& zv) {
         return reach > 0.0f && (std::max(a.x, b.x) < zv.reach_from.x - reach || std::min(a.x, b.x) > zv.reach_from.x + reach ||
                                 std::max(a.y, b.y) < zv.reach_from.y - reach || std::min(a.y, b.y) > zv.reach_from.y + reach);
     };
+    auto in_circle = [&](const glm::vec3& m) { return inside(zv.P(m.x, m.y)); };
+    const auto markers = v.current_zone
+        ? map_markers(h, h.map_filters, v.active_layer, v.show_group, true,
+                      r > 0.0f ? std::function<bool(const glm::vec3&)>(in_circle) : nullptr)
+        : MapMarkers{};
     for (const auto& l : v.lines)
         if (!out_of_reach(l.start, l.end) && v.line_shown(l, feet))
             seg(zv.P(l.start.x, l.start.y), zv.P(l.end.x, l.end.y), faded(ink(l.color), v.z_fade(l.start.z, l.end.z, feet)), w);
     if (v.line_active) seg(zv.P(v.current_point.x, v.current_point.y), here, ink(v.current_color), w);
+    if (v.layer_shown(markers.layer)) {
+        for (const auto& overlay : markers.lines) {
+            if (out_of_reach(overlay.start, overlay.end)) continue;
+            if (v.z_filter && feet) {
+                const float low = *feet - static_cast<float>(v.min_z), high = *feet + static_cast<float>(v.max_z);
+                if (std::max(overlay.start.z, overlay.end.z) < low || std::min(overlay.start.z, overlay.end.z) > high) continue;
+            }
+            seg(zv.P(overlay.start.x, overlay.start.y), zv.P(overlay.end.x, overlay.end.y),
+                faded(color(overlay.rgb, 255), v.z_fade(overlay.start.z, overlay.end.z, feet)), w);
+        }
+        for (const auto& circle : markers.circles) {
+            const glm::vec3 lo = circle.center - glm::vec3(circle.radius, circle.radius, 0.0f);
+            const glm::vec3 hi = circle.center + glm::vec3(circle.radius, circle.radius, 0.0f);
+            if (out_of_reach(lo, hi)) continue;
+            if (v.z_filter && feet && (circle.center.z < *feet - v.min_z || circle.center.z > *feet + v.max_z)) continue;
+            const ImU32 col = faded(color(circle.rgb, 255), v.z_fade(circle.center.z, feet));
+            for (int i = 0; i < kMapCircleSegments; ++i) {
+                const float a = static_cast<float>(i) * kMapCircleStep * kMapDegreesToRadians;
+                const float b = static_cast<float>(i + 1) * kMapCircleStep * kMapDegreesToRadians;
+                seg(zv.P(circle.center.x + std::cos(a) * circle.radius, circle.center.y + std::sin(a) * circle.radius),
+                    zv.P(circle.center.x + std::cos(b) * circle.radius, circle.center.y + std::sin(b) * circle.radius), col, w);
+            }
+        }
+    }
     lap.mark("map view lines");
     if (zv.labels && normal_labels) {
         ImFont* f = ImGui::GetFont();
@@ -1784,14 +1957,6 @@ void draw_zone_view(MapState& s, UiHost& h, const ZoneView& zv) {
                               IM_COL32(64, 255, 64, 255));
         }
     lap.mark("map view labels, path, compass");
-    // A plugin's spawns: a dot in the mark's colour, named with the labels.
-    // In a circle a mark shows only inside it, so the others are not asked about; a rectangle clips by itself (a
-    // label may reach in from a mark outside), so all are.
-    auto in_circle = [&](const glm::vec3& m) { return inside(zv.P(m.x, m.y)); };
-    const auto markers = v.current_zone
-        ? map_markers(h, h.map_filters, v.active_layer, v.show_group, true,
-                      r > 0.0f ? std::function<bool(const glm::vec3&)>(in_circle) : nullptr)
-        : MapMarkers{};
     auto draw_filtered_mark = [&](const auto& mk) {
         if (!mark_shown(v, mk, feet)) return;
         const glm::vec2 p = zv.P(mk.at.x, mk.at.y);
