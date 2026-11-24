@@ -420,6 +420,7 @@ void GameConnection::path_reply(const AppPacket& p) {
     ++find_replies_; // FindLocationWnd closes only for the admitted current reply
     me = world_.player();
     if (r.failed) {
+        if (request.silent) shown_find_silent_ = false; // no silent path remains to suppress a later player stop
         if (r.failed_point) failed_find_ = FailedFind{*r.failed_point, r.failed_kind};
         if (!request.silent) system(game::kStrPathPrevented, {}, 0x111);
         return;

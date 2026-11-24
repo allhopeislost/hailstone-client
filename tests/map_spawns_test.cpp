@@ -321,7 +321,7 @@ TEST_CASE("Map filters: marker sizes, shapes and vector direction use the MQ geo
     r.filters.set_enabled(mq::MapFilter::Npc, true);
     r.filters.set_color(mq::MapFilter::Npc, 0x123456);
     constexpr ImU32 kNpc = IM_COL32(0x12, 0x34, 0x56, 0);
-    const std::string minimap = "hs.DrawMinimap(300, 250, 100, 500)";
+    const std::string minimap = "hs.DrawMinimap(300, 250, 100, 100)";
     ImVec2 center{};
     std::vector<ImVec2> points;
     REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 4); // the stock filter cross

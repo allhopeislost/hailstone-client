@@ -88,6 +88,20 @@ TEST_CASE("shown Find: a silent background path has no sound, chat or facing") {
     conn.stop_find_path();
     CHECK(conn.take_sound_cues().empty());
 
+    // A failed silent reply must not leave the silent flag behind for a later player stop.
+    REQUIRE(conn.find_spawn(101, {false, true}));
+    CHECK(conn.take_sound_cues().empty());
+    rig.server.zone.send_reliable(net::encode_find_person_reply({}));
+    REQUIRE(rig.until([&] { return conn.find_replies() == replies + 2; }));
+    CHECK_FALSE(conn.player_path().active());
+    CHECK(conn.take_sound_cues().empty());
+    CHECK_FALSE(conn.poll_chat());
+    conn.stop_find_path();
+    bool abort_after_failure = false;
+    for (const auto& cue : conn.take_sound_cues())
+        abort_after_failure |= cue.kind == net::SoundCue::Kind::Wave && cue.spell == game::kPathSoundAbort;
+    CHECK(abort_after_failure);
+
     // The ordinary Find path keeps the original feedback and facing.
     REQUIRE(conn.find_spawn(101));
     bool abort = false;
@@ -95,7 +109,7 @@ TEST_CASE("shown Find: a silent background path has no sound, chat or facing") {
         abort |= cue.kind == net::SoundCue::Kind::Wave && cue.spell == game::kPathSoundAbort;
     CHECK(abort);
     rig.server.zone.send_reliable(route(200));
-    REQUIRE(rig.until([&] { return conn.find_replies() == replies + 2; }));
+    REQUIRE(rig.until([&] { return conn.find_replies() == replies + 3; }));
     bool start = false;
     for (const auto& cue : conn.take_sound_cues())
         start |= cue.kind == net::SoundCue::Kind::Wave && cue.spell == game::kPathSoundStart;
