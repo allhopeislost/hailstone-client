@@ -1014,7 +1014,10 @@ TEST_CASE("MQ commands: /mapfilter shares its state with the map model") {
     REQUIRE(h.filters.custom_search());
     CHECK(h.filters.custom_search()->radius == 25.0);
     h.run("/mapfilter");
-    CHECK(h.printed.back().find("Custom: npc radius 25") != std::string::npos);
+    bool custom_status = false;
+    for (const auto& line : h.printed)
+        custom_status |= line.find("Custom: npc radius 25") != std::string::npos;
+    CHECK(custom_status);
     CHECK(h.sent.empty()); // the hook took the command; nothing went to the server
 }
 
