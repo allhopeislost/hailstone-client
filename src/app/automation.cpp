@@ -18,6 +18,7 @@
 #include "game/nameplate_canvas.h"
 #include "mq/commands.h"
 #include "mq/lua_mq.h"
+#include "mq/map_filter.h"
 #include "mq/tlo.h"
 #include "net/game_connection.h"
 #include "plugin/native_plugins.h"
@@ -52,6 +53,7 @@ struct Automation::Impl {
     fs::path enforcement_profile;
     mq::Registry registry;
     mq::Context ctx;
+    mq::MapFilters map_filters;
     std::unique_ptr<mq::Commands> commands;
     std::unique_ptr<mq::ScriptHost> scripts;
     std::unique_ptr<plugin::NativePlugins> plugins;
@@ -160,6 +162,7 @@ struct Automation::Impl {
 Automation::Automation(AutomationEnv env) : impl_(std::make_unique<Impl>()) {
     Impl& m = *impl_;
     m.env = std::move(env);
+    if (m.env.config) m.map_filters.load(*m.env.config);
     mq::register_game_tlos(m.registry);
     m.ctx.window_open = [&m](std::string_view w) { return m.env.window_open && m.env.window_open(w); };
     m.ctx.plugin_loaded = [&m](std::string_view p) { return m.plugins && m.plugins->loaded(p); };
@@ -171,6 +174,7 @@ Automation::Automation(AutomationEnv env) : impl_(std::make_unique<Impl>()) {
     mq::CommandEnv ce;
     ce.hooks = &m.hooks;
     ce.registry = &m.registry;
+    ce.map_filters = &m.map_filters;
     ce.context = [&m]() -> const mq::Context& { return m.context(); };
     ce.echo = [&m](const std::string& t) { m.print(t); };
     ce.run = [&m](const std::string& l) { m.run(l); };

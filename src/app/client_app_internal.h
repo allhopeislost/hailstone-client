@@ -461,6 +461,7 @@ public:
         aenv.web = web_service_.get();
         aenv.install_dir = platform::install_dir();
         aenv.data_dir = platform::data_dir();
+        aenv.config = &config_;
         aenv.autoload = config_.get("plugins.autoload").value_or("*");
         aenv.script_autoload = config_.get("scripts.autoload").value_or("");
         aenv.connection = [this] { return conn_.get(); };

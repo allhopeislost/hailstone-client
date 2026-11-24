@@ -445,9 +445,9 @@ Not yet:
 
 `/echo`, `/target` (`id N`, `clear`, `mycorpse`, `myself`, or a spawn search; with nothing, yourself; `next` / `prev`
 walk the search's matches), `/face` (target, `id`, `heading H`, `loc y,x`,
-a search; `fast`), `/keypress <command> [hold|release]` (the game's key command names: `forward`, `jump`, `hot1_1`, ...),
-`/squelch <cmd>`, `/docommand <cmd>`, `/noparse <cmd>`, `/timed <deciseconds> <cmd>`, `/lua ...`, `/plugin ...`. `/nav` (MQ2Nav's commands),
-`/moveto` and `/stick` are built in (`docs/navigation.md`).
+a search; `fast`), `/mapfilter` (MacroQuest's map filters and colours), `/keypress <command> [hold|release]` (the game's
+key command names: `forward`, `jump`, `hot1_1`, ...), `/squelch <cmd>`, `/docommand <cmd>`, `/noparse <cmd>`, `/timed <deciseconds> <cmd>`, `/lua ...`,
+`/plugin ...`. `/nav` (MQ2Nav's commands), `/moveto` and `/stick` are built in (`docs/navigation.md`).
 
 `${...}` is parsed in every command line, typed or scripted, except:
 
