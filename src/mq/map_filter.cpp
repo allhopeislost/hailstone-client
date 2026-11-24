@@ -374,7 +374,7 @@ std::optional<MapFilterMark> MapFilters::spawn_mark(const game::Spawn& spawn, co
 
     const MapFilter base = base_filter();
     if (base == F::Invalid) return std::nullopt;
-    MapFilterMark out;
+    MapFilterMark out{};
     out.marker_filter = type == game::eSpawnType::CORPSE ? F::Corpse : base;
     out.target = input.target && enabled(F::Target);
     out.color_filter = out.target ? F::Target : base;
