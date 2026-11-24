@@ -867,9 +867,9 @@ public:
     // The path to a spawn by id. `options.face` turns the player toward it when the reply comes; `options.silent`
     // keeps a background path (the map filter) from playing path sounds or chat. False when there is no such spawn.
     struct FindPathOptions {
-        bool face = true;
-        bool silent = false;
-        constexpr FindPathOptions() = default;
+        bool face;
+        bool silent;
+        constexpr FindPathOptions() : face(true), silent(false) {}
         constexpr FindPathOptions(bool face_value, bool silent_value = false)
             : face(face_value), silent(silent_value) {}
     };
