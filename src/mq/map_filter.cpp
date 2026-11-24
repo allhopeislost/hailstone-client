@@ -492,7 +492,7 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
 
     if (is_radius(*spec)) {
         double value = 0.0;
-        if (const auto parsed = core::finite_float_from_text<double>(rest)) value = *parsed;
+        if (const auto parsed = finite_float_from_text<double>(rest)) value = *parsed;
         value = std::clamp(value, 0.0, static_cast<double>(kMapFilterMaxRadius));
         filters.set_radius(*filter, static_cast<float>(value));
         say(std::format("{} is now set to: {:.2f}", spec->name, filters.state(*filter).radius));

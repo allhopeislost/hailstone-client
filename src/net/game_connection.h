@@ -869,6 +869,9 @@ public:
     struct FindPathOptions {
         bool face = true;
         bool silent = false;
+        constexpr FindPathOptions() = default;
+        constexpr FindPathOptions(bool face_value, bool silent_value = false)
+            : face(face_value), silent(silent_value) {}
     };
     bool find_spawn(std::uint32_t spawn_id, FindPathOptions options = {});
     // True while a shown Find is active or its request is still waiting for a reply. A finished/failed path is not
