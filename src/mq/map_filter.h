@@ -14,8 +14,8 @@
 
 #include <glm/vec3.hpp>
 
-#include "mq/spawn_search.h"
 #include "core/config.h"
+#include "mq/spawn_search.h"
 
 namespace hailstone::game { struct GuildState; struct Spawn; struct WorldState; }
 
@@ -102,10 +102,10 @@ struct MapFilterState {
 
 class MapFilters {
 public:
-    explicit MapFilters(core::Config* config = nullptr);
+    explicit MapFilters(Config* config = nullptr);
 
-    void load(core::Config& config);
-    void save(core::Config& config) const;
+    void load(Config& config);
+    void save(Config& config) const;
     std::uint64_t revision() const { return revision_; }
 
     bool enabled(MapFilter filter) const;
@@ -135,7 +135,7 @@ public:
 private:
     static constexpr std::size_t kCount = static_cast<std::size_t>(MapFilter::Last);
     std::array<MapFilterState, kCount> states_{};
-    core::Config* config_ = nullptr;
+    Config* config_ = nullptr;
     std::uint64_t revision_ = 0;
     std::optional<std::string> custom_text_;
     std::optional<SpawnSearch> custom_search_;

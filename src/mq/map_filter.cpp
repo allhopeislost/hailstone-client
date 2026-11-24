@@ -171,7 +171,7 @@ std::optional<MapMarker> find_map_marker(std::string_view name) {
     return std::nullopt;
 }
 
-MapFilters::MapFilters(core::Config* config) : config_(config) {
+MapFilters::MapFilters(Config* config) : config_(config) {
     for (std::size_t i = 0; i < states_.size(); ++i) {
         const auto& spec = kSpecs[i];
         states_[i].enabled = spec.filter == F::All || spec.filter == F::NormalLabels;
@@ -180,7 +180,7 @@ MapFilters::MapFilters(core::Config* config) : config_(config) {
     if (config_) load(*config_);
 }
 
-void MapFilters::load(core::Config& config) {
+void MapFilters::load(Config& config) {
     config_ = &config;
     for (const auto& spec : kSpecs) {
         auto& state = states_[index_of(spec.filter)];
@@ -204,7 +204,7 @@ void MapFilters::load(core::Config& config) {
     camp_anchor_valid_ = pull_anchor_valid_ = false;
 }
 
-void MapFilters::save(core::Config& config) const {
+void MapFilters::save(Config& config) const {
     for (const auto& spec : kSpecs) {
         const auto& state = states_[index_of(spec.filter)];
         if (spec.filter != F::Custom) config.set_bool(key(spec.name, "enabled"), state.enabled);

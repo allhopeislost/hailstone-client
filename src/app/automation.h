@@ -32,7 +32,7 @@
 #include "plugin/policy.h"
 #include "plugin/world_geometry.h"
 
-namespace hailstone::core { class Config; }
+namespace hailstone { class Config; }
 namespace hailstone::net { class GameConnection; }
 namespace hailstone::mq { class ScriptHost; class Registry; class MapFilters; struct Context; }
 namespace hailstone::game { class ExtensionChain; class NameplateCanvasRegistry; struct SpellData; }
@@ -44,7 +44,7 @@ namespace hailstone::app {
 struct AutomationEnv {
     std::filesystem::path install_dir; // the folder of the binary (platform::install_dir())
     std::filesystem::path data_dir;    // the folder Hailstone writes to (platform::data_dir())
-    core::Config* config = nullptr;    // shared client settings, including the global map filters
+    Config* config = nullptr;             // shared client settings, including the global map filters
     std::string autoload = "*";       // plugins.autoload
     std::string script_autoload;      // scripts.autoload: the player's scripts started when the rules allow them
     std::function<net::GameConnection*()> connection;
