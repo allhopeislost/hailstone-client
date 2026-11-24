@@ -482,8 +482,8 @@ TEST_CASE("Map filters: benchmark collection cost when requested") {
     std::printf("MAPFILTER_BENCH,sizeof_spawn=%zu\n", sizeof(game::Spawn));
     constexpr std::array<std::string_view, 4> cases{"none", "target", "npc", "custom"};
     constexpr std::array<std::pair<std::string_view, std::string_view>, 2> views{
-        {"map", "hs.UI.map.Draw(0, 0, 600, 500, true)"},
-        {"minimap", "hs.DrawMinimap(300, 250, 100, 500)"}};
+        std::pair{"map", "hs.UI.map.Draw(0, 0, 600, 500, true)"},
+        std::pair{"minimap", "hs.DrawMinimap(300, 250, 100, 500)"}};
 
     for (const std::size_t count : {std::size_t{1000}, std::size_t{3000}}) {
         for (const bool provider : {false, true}) {
