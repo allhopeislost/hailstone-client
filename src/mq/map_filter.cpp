@@ -287,10 +287,10 @@ void MapFilters::set_color(MapFilter filter, std::uint32_t color) {
 void MapFilters::set_marker(MapFilter filter, MapMarker marker, int size) {
     if (!valid(filter)) return;
     size = std::clamp(size, kMapFilterMinMarkerSize, kMapFilterMaxMarkerSize);
-    auto& state = states_[index_of(filter)];
-    if (state.marker == marker && state.marker_size == size && state(F::Marker).enabled) return;
-    state.marker = marker;
-    state.marker_size = size;
+    auto& option_state = states_[index_of(filter)];
+    if (option_state.marker == marker && option_state.marker_size == size && state(F::Marker).enabled) return;
+    option_state.marker = marker;
+    option_state.marker_size = size;
     states_[index_of(F::Marker)].enabled = true;
     changed();
 }
