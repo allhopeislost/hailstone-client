@@ -100,6 +100,22 @@ struct MapFilterState {
     int marker_size = 0;
 };
 
+struct MapFilterMark {
+    MapFilter color_filter = MapFilter::Invalid;
+    MapFilter marker_filter = MapFilter::Invalid;
+    std::uint32_t rgb = 0;
+    std::string label;
+    bool target = false;
+};
+
+struct MapFilterSpawnInput {
+    bool target = false;
+    bool group = false;
+    int player_level = 0;
+    std::int32_t pvp_rules = 0;
+    const SpawnSearchMatcher* custom = nullptr;
+};
+
 class MapFilters {
 public:
     explicit MapFilters(Config* config = nullptr);
@@ -158,22 +174,6 @@ private:
 struct MapFilterCommandInput {
     const game::WorldState* world = nullptr;
     const game::GuildState* guild = nullptr;
-};
-
-struct MapFilterMark {
-    MapFilter color_filter = MapFilter::Invalid;
-    MapFilter marker_filter = MapFilter::Invalid;
-    std::uint32_t rgb = 0;
-    std::string label;
-    bool target = false;
-};
-
-struct MapFilterSpawnInput {
-    bool target = false;
-    bool group = false;
-    int player_level = 0;
-    std::int32_t pvp_rules = 0;
-    const SpawnSearchMatcher* custom = nullptr;
 };
 
 // /mapfilter, help and status. `say` receives one chat line at a time; the caller decides colour and squelch handling.

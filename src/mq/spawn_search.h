@@ -24,7 +24,7 @@ struct GroupState;
 struct RaidState;
 struct GuildState;
 struct XTargetState;
-enum eSpawnType;
+enum eSpawnType : int;
 } // namespace hailstone::game
 namespace hailstone::net { class GameConnection; struct FellowshipState; }
 
