@@ -44,6 +44,12 @@ TEST_CASE("Map filters: MacroQuest's options, defaults and dependencies") {
     CHECK(filters.state(MapFilter::Corpse).rgb == 0x00c000u);
     CHECK(filters.state(MapFilter::TargetLine).rgb == 0x800000u);
 
+    Config empty_config;
+    MapFilters configured(&empty_config);
+    CHECK(configured.state(MapFilter::Pc).rgb == 0xff00ffu);
+    CHECK(configured.state(MapFilter::Npc).rgb == 0x404040u);
+    CHECK(configured.state(MapFilter::TargetLine).rgb == 0x800000u);
+
     CHECK(filters.requirements_met(MapFilter::Pc));
     CHECK_FALSE(filters.requirements_met(MapFilter::PcConColor));
     CHECK_FALSE(filters.requirements_met(MapFilter::Group));

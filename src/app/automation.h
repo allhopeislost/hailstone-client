@@ -44,7 +44,7 @@ namespace hailstone::app {
 struct AutomationEnv {
     std::filesystem::path install_dir; // the folder of the binary (platform::install_dir())
     std::filesystem::path data_dir;    // the folder Hailstone writes to (platform::data_dir())
-    Config* config = nullptr;             // shared client settings, including the global map filters
+    Config* config = nullptr;    // shared client settings, including the global map filters
     std::string autoload = "*";       // plugins.autoload
     std::string script_autoload;      // scripts.autoload: the player's scripts started when the rules allow them
     std::function<net::GameConnection*()> connection;

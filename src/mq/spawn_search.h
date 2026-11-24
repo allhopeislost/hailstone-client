@@ -25,6 +25,7 @@ struct RaidState;
 struct GuildState;
 struct XTargetState;
 } // namespace hailstone::game
+
 namespace hailstone::net { class GameConnection; struct FellowshipState; }
 
 namespace hailstone::mq {

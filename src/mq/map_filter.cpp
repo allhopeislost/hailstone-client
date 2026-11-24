@@ -194,7 +194,9 @@ void MapFilters::load(Config& config) {
             state.radius = std::clamp(config.get_float(key(spec.name, "radius"), 0.0f), 0.0f, kMapFilterMaxRadius);
             state.enabled = state.radius > 0.0f;
         }
-        if (has_colour(spec)) state.rgb = static_cast<std::uint32_t>(config.get_int(key(spec.name, "color"), 0)) & 0xffffffu;
+        if (has_colour(spec))
+            state.rgb = static_cast<std::uint32_t>(config.get_int(key(spec.name, "color"), static_cast<int>(spec.default_rgb))) &
+                        0xffffffu;
         if (auto marker = find_map_marker(config.get_string(key(spec.name, "marker"), "None"))) state.marker = *marker;
         state.marker_size = std::clamp(config.get_int(key(spec.name, "marker-size"), 0), 0, kMapFilterMaxMarkerSize);
     }
@@ -291,9 +293,9 @@ void MapFilters::set_marker(MapFilter filter, MapMarker marker, int size) {
 }
 
 void MapFilters::set_marker_enabled(bool enabled) {
-    auto& state = states_[index_of(F::Marker)];
-    if (state.enabled == enabled) return;
-    state.enabled = enabled;
+    auto& option_state = states_[index_of(F::Marker)];
+    if (option_state.enabled == enabled) return;
+    option_state.enabled = enabled;
     changed();
 }
 
