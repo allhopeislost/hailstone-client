@@ -19,6 +19,12 @@
 
 #include "game/world_state.h"
 
+namespace hailstone::game {
+struct GroupState;
+struct RaidState;
+struct GuildState;
+struct XTargetState;
+} // namespace hailstone::game
 namespace hailstone::net { class GameConnection; struct FellowshipState; }
 
 namespace hailstone::mq {
