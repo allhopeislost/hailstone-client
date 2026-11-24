@@ -339,6 +339,7 @@ TEST_CASE("Map filters: corpses, consider colours and group colour precedence") 
     REQUIRE(mark);
     CHECK(mark->color_filter == MapFilter::Group);
     CHECK(mark->rgb == 0x0080c0u);
+    filters.set_enabled(MapFilter::Target, true);
     input.target = true;
     mark = filters.spawn_mark(player, input);
     REQUIRE(mark);

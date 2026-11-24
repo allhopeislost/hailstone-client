@@ -67,7 +67,7 @@ int marked_vertices(lua_State* L, const std::string& code, std::optional<ImU32> 
 }
 
 struct MarkerFilter final : game::ServerExtension {
-    bool deny_group = false, deny_rat = false, marks = false;
+    bool deny_group = false, deny_npcs = false, marks = false;
     mutable int self_queries = 0, group_queries = 0;
     std::uint64_t content = 1, life = 1;
     mutable unsigned policy_queries = 0, lifecycle_queries = 0;
@@ -87,7 +87,7 @@ struct MarkerFilter final : game::ServerExtension {
     }
     bool map_visible(const net::GameConnection&, const game::Spawn& sp, std::uint32_t purpose) const override {
         if (purpose != 0) return true; // independent Find admission
-        if (sp.id == 10 && deny_rat) return false;
+        if (deny_npcs && sp.is_npc) return false;
         if (sp.id == 1) ++self_queries;
         if (sp.id == 12) ++group_queries;
         const auto callback = on_visible;
@@ -131,7 +131,7 @@ struct MarkerRig {
         host.maps_dir = scratch.path() / "maps";
         if (map_label) {
             std::filesystem::create_directories(host.maps_dir);
-            std::ofstream(host.maps_dir / "qeynos2.txt") << "P 0, 0, 0,  255, 0, 0,  1,  Test_Label\n";
+            std::ofstream(host.maps_dir / "qeynos2.txt") << "P 0, 0, 0,  255, 255, 0,  1,  Test_Label\n";
         }
         std::ofstream(scratch.path() / "UI.ini") << "[MapViewWnd]\nShowGroup=true\n"
             "GroupColor.red=74\nGroupColor.green=145\nGroupColor.blue=210\n"
@@ -277,15 +277,15 @@ TEST_CASE("Map filters: server marker denial wins over command filters") {
     r.filters.set_enabled(mq::MapFilter::Npc, true);
     constexpr ImU32 kNpc = IM_COL32(0x40, 0x40, 0x40, 0);
     for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kNpc) > 0);
-    filter->deny_rat = true;
+    filter->deny_npcs = true;
     for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kNpc) == 0);
-    filter->deny_rat = false;
+    filter->deny_npcs = false;
     for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kNpc) > 0);
 }
 
 TEST_CASE("Map filters: NormalLabels hides only the game's map labels") {
     MarkerRig r({}, true);
-    constexpr ImU32 kLabel = IM_COL32(255, 0, 0, 0);
+    constexpr ImU32 kLabel = IM_COL32(255, 255, 0, 0);
     CHECK(marked_vertices(r.L, kMapDraws[0], kLabel) > 0);
     CHECK(marked_vertices(r.L, kMapDraws[1], kLabel) > 0);
     r.filters.set_enabled(mq::MapFilter::NormalLabels, false);
