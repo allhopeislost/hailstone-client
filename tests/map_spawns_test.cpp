@@ -77,15 +77,15 @@ int marked_vertices(lua_State* L, const std::string& code, std::optional<ImU32> 
     return n;
 }
 
-// The same frame without scanning its vertices; the benchmark times the real draw path, not the test harness.
-void draw_only(lua_State* L, const std::string& code) {
+// Runs an already loaded Lua chunk in one map frame, without scanning its vertices.
+void draw_prepared(lua_State* L) {
     ImGui::GetIO().DisplaySize = ImVec2(800, 600);
     ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
     ImGui::NewFrame();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(600, 500));
     ImGui::Begin("map");
-    if (luaL_dostring(L, code.c_str()) != LUA_OK) {
+    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
         FAIL(lua_tostring(L, -1));
         lua_settop(L, 0);
     }
@@ -516,13 +516,23 @@ TEST_CASE("Map filters: benchmark collection cost when requested") {
             for (const auto& name : cases) {
                 configure(name);
                 for (const auto& [view, code] : views) {
-                    for (int i = 0; i < 5; ++i) draw_only(r.L, std::string(code));
+                    const std::string draw_code(code);
+                    REQUIRE(luaL_loadstring(r.L, draw_code.c_str()) == LUA_OK);
+                    for (int i = 0; i < 5; ++i) {
+                        lua_pushvalue(r.L, -1);
+                        draw_prepared(r.L);
+                    }
                     if (filter) filter->visible_queries = 0;
                     fuzz::start_allocation_count();
                     const auto start = std::chrono::steady_clock::now();
-                    for (int i = 0; i < iterations; ++i) draw_only(r.L, std::string(code));
-                    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                    for (int i = 0; i < iterations; ++i) {
+                        lua_pushvalue(r.L, -1);
+                        draw_prepared(r.L);
+                    }
+                    const double ms =
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
                     const auto allocations = fuzz::stop_allocation_count();
+                    lua_pop(r.L, 1); // the prepared chunk
                     const auto queries = filter ? filter->visible_queries : 0;
                     std::printf("MAPFILTER_BENCH,provider=%d,n=%zu,case=%.*s,view=%.*s,iterations=%d,ms=%.6f,"
                                 "allocs=%zu,bytes=%zu,visible_queries=%zu\n",
