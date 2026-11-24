@@ -15,8 +15,8 @@
 #include <glm/vec3.hpp>
 
 #include "mq/spawn_search.h"
+#include "core/config.h"
 
-namespace hailstone::core { class Config; }
 namespace hailstone::game { struct GuildState; struct Spawn; struct WorldState; }
 
 namespace hailstone::mq {
@@ -74,7 +74,7 @@ enum MapFilterFlags : std::uint32_t {
 struct MapFilterSpec {
     const char* name;
     MapFilter filter;
-    MapFilter requires;
+    MapFilter parent;
     std::uint32_t flags;
     std::uint32_t default_rgb;
     const char* help;

@@ -219,12 +219,12 @@ void MapFilters::save(core::Config& config) const {
 bool MapFilters::enabled(MapFilter filter) const {
     if (!valid(filter)) return filter == F::Invalid;
     const auto& spec = kSpecs[index_of(filter)];
-    return states_[index_of(filter)].enabled && enabled(spec.requires);
+    return states_[index_of(filter)].enabled && enabled(spec.parent);
 }
 
 bool MapFilters::requirements_met(MapFilter filter) const {
     const auto* spec = map_filter_spec(filter);
-    return spec && enabled(spec->requires);
+    return spec && enabled(spec->parent);
 }
 
 const MapFilterState& MapFilters::state(MapFilter filter) const {
@@ -383,7 +383,7 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
     }
 
     if (!filters.requirements_met(*filter)) {
-        const auto* required = map_filter_spec(spec->requires);
+        const auto* required = map_filter_spec(spec->parent);
         say(std::format("'{}' requires '{}' option.  Please enable this option first.", spec->name,
                         required ? required->name : "unknown"));
         return;
