@@ -436,6 +436,11 @@ TEST_CASE("Map filters: NormalLabels hides only the game's map labels") {
     r.filters.set_enabled(mq::MapFilter::NormalLabels, false);
     CHECK(marked_vertices(r.L, kMapDraws[0], kLabel) == 0);
     CHECK(marked_vertices(r.L, kMapDraws[1], kLabel) == 0);
+
+    r.api->begin_frame();
+    REQUIRE(luaL_dostring(r.L, "hs.ShowWindow('MapToolbarWnd', true)") == LUA_OK);
+    CHECK(marked_vertices(r.L, kMapDraws[0], kLabel) > 0); // the editor still needs its labels
+    CHECK(marked_vertices(r.L, kMapDraws[1], kLabel) == 0); // the minimap has no editor
 }
 
 TEST_CASE("Map spawns: group marker admission is deny-wins on every map and independent of self and Find") {

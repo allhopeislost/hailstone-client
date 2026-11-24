@@ -520,6 +520,26 @@ TEST_CASE("Map filters: ground objects use their actor label without inventing a
     CHECK(MapFilters::ground_label(object) == "Ground item");
 }
 
+TEST_CASE("Spawn search matcher: owns its search across custom-filter replacement") {
+    game::WorldState world;
+    world.player_id = 1;
+    game::Spawn rat;
+    rat.id = 10;
+    rat.name = "a_rat01";
+    rat.is_npc = true;
+    world.spawns.emplace(10, rat);
+    game::Spawn player;
+    player.id = 11;
+    player.name = "OtherPlayer";
+    world.spawns.emplace(11, player);
+
+    auto search = parse_spawn_search("npc");
+    const SpawnSearchMatcher matcher(search, world, {});
+    search = parse_spawn_search("pc"); // a reentrant /mapfilter custom replaces the original
+    CHECK(matcher.matches(rat));
+    CHECK_FALSE(matcher.matches(player));
+}
+
 TEST_CASE("Spawn search matcher: prepared nopcnear candidates survive spawn replacement") {
     game::WorldState world;
     world.player_id = 1;

@@ -79,15 +79,16 @@ struct SearchSources {
 };
 SearchSources sources_of(const net::GameConnection& conn);
 
-// One prepared search for many spawns. `nopcnear` candidates are kept by id, not pointer, so a provider callback may
-// replace the world's spawn map while a map is being collected without leaving dangling candidates here.
+// One prepared search for many spawns. The search is owned so a provider callback can replace a MapFilters custom
+// search while a map is being collected without leaving a dangling reference. `nopcnear` candidates are kept by id,
+// not pointer, so the same callback may replace the world's spawn map safely.
 class SpawnSearchMatcher {
 public:
     SpawnSearchMatcher(const SpawnSearch& search, const game::WorldState& world, const SearchSources& sources);
     bool matches(const game::Spawn& spawn) const;
 
 private:
-    const SpawnSearch& search_;
+    SpawnSearch search_;
     const game::WorldState& world_;
     SearchSources sources_;
     std::vector<std::uint32_t> near_players_;

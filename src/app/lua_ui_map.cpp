@@ -1520,6 +1520,7 @@ int DrawMap(lua_State* L) {
     auto T = [&](float x, float y) { return v.transform(x, y, cw, ch); };
     bool edit = s.edit_mode();
     const bool normal_labels = !h.map_filters || h.map_filters->enabled(mq::MapFilter::NormalLabels);
+    const bool labels_visible = normal_labels || edit; // the editor needs the labels it edits
     auto draw_filtered_mark = [&](const auto& mk, bool show_label) {
         if (!mark_shown(v, mk, feet)) return;
         glm::vec2 p = T(mk.at.x, mk.at.y);
@@ -1589,7 +1590,7 @@ int DrawMap(lua_State* L) {
             }
         }
     }
-    if (mouse_in && normal_labels && !hover_member && !hover_mark) {
+    if (mouse_in && labels_visible && !hover_member && !hover_mark) {
         float best_label = 20.0f, best_line = 3.0f;
         for (auto& l : v.labels) {
             if (!v.label_shown(l, feet)) continue;
@@ -1689,7 +1690,7 @@ int DrawMap(lua_State* L) {
     // The labels.
     game::MapLabel* marked = edit ? v.marked_label : nullptr;
     for (auto& l : v.labels) {
-        if (!normal_labels || !v.label_shown(l, feet)) continue;
+        if (!labels_visible || !v.label_shown(l, feet)) continue;
         glm::vec2 p = T(l.pos.x, l.pos.y);
         bool lit = &l == s.hover_label || &l == marked;
         ImU32 col = lit ? color(kHighlight) : faded(color(l.color), v.z_fade(l.pos.z, feet));
