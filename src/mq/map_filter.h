@@ -164,12 +164,14 @@ struct MapFilterTargetPathState {
     std::uint64_t context = 0;
     std::uint32_t target = 0;
     std::uint64_t incarnation = 0;
+    std::uint64_t generation = 0;
     bool requested = false;
     bool owns_path = false;
 };
 
-// Keep the server find path on the current target while TargetPath is enabled. A path the player starts for another
-// purpose is left alone; disabling the option only stops a path this updater owns.
+// Keep the server find path on the current target while TargetPath is enabled. The background path is silent and
+// never turns the player. A path the player starts takes ownership back; TargetPath then leaves it alone until the
+// option is toggled or the target changes again. Disabling the option only stops a path this updater still owns.
 void update_map_filter_target_path(MapFilters& filters, net::GameConnection& connection,
                                    MapFilterTargetPathState& state);
 

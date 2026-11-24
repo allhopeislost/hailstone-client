@@ -2,13 +2,16 @@
 // map and the map window draw the marks it gives, and nothing more without it.
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <imgui.h>
 #include <lua.hpp>
@@ -42,7 +45,7 @@ constexpr ImU32 kMark = IM_COL32(0x12, 0x34, 0x56, 0xff);
 // Draws `code` (hs.* calls) in a window and counts the vertices in the mark's colour (or with `rgb`, in that colour
 // at any alpha).
 int marked_vertices(lua_State* L, const std::string& code, std::optional<ImU32> rgb = std::nullopt,
-                    ImVec2* center = nullptr) {
+                    ImVec2* center = nullptr, std::vector<ImVec2>* positions = nullptr) {
     ImGui::GetIO().DisplaySize = ImVec2(800, 600);
     ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
     ImGui::NewFrame();
@@ -55,10 +58,12 @@ int marked_vertices(lua_State* L, const std::string& code, std::optional<ImU32> 
     }
     int n = 0;
     ImVec2 sum{};
+    if (positions) positions->clear();
     for (const ImDrawVert& v : ImGui::GetWindowDrawList()->VtxBuffer)
         if (rgb ? (v.col & 0x00ffffffu) == *rgb : v.col == kMark) {
             ++n;
             sum.x += v.pos.x; sum.y += v.pos.y;
+            if (positions) positions->push_back(v.pos);
         }
     if (center && n) *center = ImVec2(sum.x / static_cast<float>(n), sum.y / static_cast<float>(n));
     ImGui::End();
@@ -302,6 +307,93 @@ TEST_CASE("Map filters: vectors, markers and target overlays draw on every map v
     r.filters.set_enabled(mq::MapFilter::TargetMelee, false);
     r.filters.set_radius(mq::MapFilter::CastRadius, 40.0f);
     for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kRadius) > 0);
+}
+
+TEST_CASE("Map filters: marker sizes, shapes and vector direction use the MQ geometry") {
+    MarkerRig r;
+    auto& world = net::GameConnectionTestAccess::world(*r.world.conn);
+    world.spawns.at(11).is_npc = false;
+    world.spawns.at(13).is_npc = false;
+    auto& rat = world.spawns.at(10);
+    rat.heading = 0.0f;
+    rat.speed_run = 0.0f;
+    rat.velocity = {0.0f, 0.0f, 0.0f};
+    r.filters.set_enabled(mq::MapFilter::Npc, true);
+    r.filters.set_color(mq::MapFilter::Npc, 0x123456);
+    constexpr ImU32 kNpc = IM_COL32(0x12, 0x34, 0x56, 0);
+    const std::string minimap = "hs.DrawMinimap(300, 250, 100, 500)";
+    ImVec2 center{};
+    std::vector<ImVec2> points;
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 4); // the stock filter cross
+
+    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Square, 20);
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 12);
+    auto width = [&] {
+        const auto [lo, hi] = std::minmax_element(points.begin(), points.end(), [](ImVec2 a, ImVec2 b) { return a.x < b.x; });
+        return hi->x - lo->x;
+    };
+    CHECK(width() == doctest::Approx(20.0f).epsilon(0.05));
+    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Square, 10);
+    CHECK(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 12);
+    CHECK(width() == doctest::Approx(10.0f).epsilon(0.05));
+    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Diamond, 10);
+    CHECK(marked_vertices(r.L, minimap, kNpc) == 12);
+    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Triangle, 10);
+    CHECK(marked_vertices(r.L, minimap, kNpc) == 10);
+    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Ring, 10);
+    CHECK(marked_vertices(r.L, minimap, kNpc) == 20);
+
+    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::None, 0);
+    r.filters.set_enabled(mq::MapFilter::Vector, true);
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 6);
+    const auto farthest = [&] {
+        return *std::max_element(points.begin(), points.end(), [&](ImVec2 a, ImVec2 b) {
+            const auto ax = a.x - center.x, ay = a.y - center.y, bx = b.x - center.x, by = b.y - center.y;
+            return ax * ax + ay * ay < bx * bx + by * by;
+        });
+    };
+    auto tip = farthest(); // heading 0 points north on the map
+    CHECK(tip.y < center.y - 2.0f);
+    CHECK(std::abs(tip.x - center.x) < 1.0f);
+    rat.heading = 128.0f; // a quarter turn points left
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 6);
+    tip = farthest();
+    CHECK(tip.x < center.x - 2.0f);
+    CHECK(std::abs(tip.y - center.y) < 1.0f);
+
+    r.filters.set_enabled(mq::MapFilter::Vector, false);
+    r.filters.set_color(mq::MapFilter::CastRadius, 0x654321);
+    r.filters.set_radius(mq::MapFilter::CastRadius, 40.0f);
+    constexpr ImU32 kCircle = IM_COL32(0x65, 0x43, 0x21, 0);
+    REQUIRE(marked_vertices(r.L, minimap, kCircle, nullptr, &points) == 72); // 36 segments
+    CHECK(width() == doctest::Approx(80.0f).epsilon(0.05));
+}
+
+TEST_CASE("Map filters: minimap target geometry reaches in from outside the circle") {
+    MarkerRig r;
+    auto& world = net::GameConnectionTestAccess::world(*r.world.conn);
+    world.spawns.at(10).position = game::server_to_world({200.0f, 0.0f, 0.0f});
+    r.filters.set_enabled(mq::MapFilter::Target, true);
+    r.filters.set_enabled(mq::MapFilter::TargetLine, true);
+    constexpr ImU32 kTarget = IM_COL32(0xc0, 0, 0, 0);
+    constexpr ImU32 kLine = IM_COL32(0x80, 0, 0, 0);
+    constexpr ImU32 kRadius = IM_COL32(0x80, 0x80, 0x80, 0);
+    const std::string minimap = "hs.DrawMinimap(300, 250, 100, 500)";
+    CHECK(marked_vertices(r.L, minimap, kTarget) == 0); // the target's own dot stays outside
+    CHECK(marked_vertices(r.L, minimap, kLine) > 0);   // but the line crosses the visible circle
+    r.filters.set_radius(mq::MapFilter::TargetRadius, 150.0f);
+    CHECK(marked_vertices(r.L, minimap, kRadius) > 0); // and so does the near arc of its circle
+
+    auto filter = std::make_shared<MarkerFilter>();
+    filter->deny_npcs = true;
+    MarkerRig denied(filter);
+    auto& denied_world = net::GameConnectionTestAccess::world(*denied.world.conn);
+    denied_world.spawns.at(10).position = game::server_to_world({200.0f, 0.0f, 0.0f});
+    denied.filters.set_enabled(mq::MapFilter::Target, true);
+    denied.filters.set_enabled(mq::MapFilter::TargetLine, true);
+    denied.filters.set_radius(mq::MapFilter::TargetRadius, 150.0f);
+    CHECK(marked_vertices(denied.L, minimap, kLine) == 0);
+    CHECK(marked_vertices(denied.L, minimap, kRadius) == 0);
 }
 
 TEST_CASE("Map filters: server marker denial wins over command filters") {

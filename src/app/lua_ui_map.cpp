@@ -1187,6 +1187,7 @@ void append_map_marker(std::vector<MapFilterLine>& lines, glm::vec3 center, mq::
     } else if (shape == mq::MapMarker::Triangle) {
         const float angle = game::heading_to_yaw(heading);
         const float radius = side * kMapTriangleRadiusScale;
+        // MQ2Map's triangle is deliberately arrow-like: its first vertex uses +sin/+cos, the other two -sin/-cos.
         const glm::vec2 a(-std::sin(angle) * radius, -std::cos(angle) * radius);
         const float a1 = angle + kMapTriangleSideOneDegrees * kMapDegreesToRadians;
         const float a2 = angle + kMapTriangleSideTwoDegrees * kMapDegreesToRadians;
@@ -1321,6 +1322,15 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             if (!current() || !c.matches(actor)) return std::nullopt;
             return c.world().spawns.at(actor.id);
         };
+        auto filter_input = [&](const game::Spawn& sp, bool group) {
+            mq::MapFilterSpawnInput input;
+            input.target = sp.id == c.world().target_id;
+            input.group = group;
+            input.player_level = static_cast<int>(c.player_status().level);
+            input.pvp_rules = c.pvp_rules();
+            input.custom = custom_matcher ? &*custom_matcher : nullptr;
+            return input;
+        };
         MapMarkers out;
         out.layer = active_layer;
         for (const auto& actor : actors) {
@@ -1329,31 +1339,32 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             const bool group = std::any_of(group_actors.begin(), group_actors.end(), [&](const auto& candidate) {
                 return candidate && *candidate == actor;
             });
-            const bool custom = show_custom && (!in_view || in_view(spawn_map(*sp)));
+            const glm::vec3 at = spawn_map(*sp);
+            const bool visible = !in_view || in_view(at);
+            const bool is_target = sp->id == c.world().target_id;
+            const bool custom = show_custom && visible;
             std::optional<mq::MapFilterMark> filtered;
-            if (filters && (!in_view || in_view(spawn_map(*sp)))) {
-                mq::MapFilterSpawnInput filter_input;
-                filter_input.target = sp->id == c.world().target_id;
-                filter_input.group = group;
-                filter_input.player_level = static_cast<int>(c.player_status().level);
-                filter_input.pvp_rules = c.pvp_rules();
-                filter_input.custom = custom_matcher ? &*custom_matcher : nullptr;
-                filtered = filters->spawn_mark(*sp, filter_input);
+            // The current target also feeds TargetLine/TargetRadius/TargetMelee when it is outside the minimap's
+            // circle: those lines and arcs can still cross into view. Its own dot and label remain clipped.
+            if (filters && (visible || is_target)) {
+                filtered = filters->spawn_mark(*sp, filter_input(*sp, group));
+                if (filtered && !visible && !filtered->target) filtered.reset();
             }
             if (!group && !custom && !filtered) continue;
+            if (!visible && !(filtered && filtered->target)) continue;
             const bool allowed = c.server_ext().map_visible(c, *sp, 0); // HAILSTONE_MAP_VISIBLE_MARKER
             sp = copy(actor);
             if (!sp || !allowed) continue;
-            if (filters && (!in_view || in_view(spawn_map(*sp)))) {
-                mq::MapFilterSpawnInput filter_input;
-                filter_input.target = sp->id == c.world().target_id;
-                filter_input.group = group;
-                filter_input.player_level = static_cast<int>(c.player_status().level);
-                filter_input.pvp_rules = c.pvp_rules();
-                filter_input.custom = custom_matcher ? &*custom_matcher : nullptr;
-                filtered = filters->spawn_mark(*sp, filter_input);
+            const glm::vec3 admitted_at = spawn_map(*sp);
+            const bool admitted_visible = !in_view || in_view(admitted_at);
+            if (filters && (admitted_visible || sp->id == c.world().target_id)) {
+                filtered = filters->spawn_mark(*sp, filter_input(*sp, group));
+                if (filtered && !admitted_visible && !filtered->target) filtered.reset();
+            } else {
+                filtered.reset();
             }
             if (!group && !custom && !filtered) continue;
+            if (!admitted_visible && !(filtered && filtered->target)) continue;
             std::optional<game::MapSpawnMark> mark;
             if (custom) {
                 game::MapSpawnMark d;
@@ -1366,15 +1377,17 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             }
             // A filtered mark replaces Hailstone's stock group dot for that actor, so one spawn is not drawn twice.
             if (group && !filtered && same_group() && member(*sp)) out.group.push_back({actor, *sp});
-            if (filtered && (!in_view || in_view(spawn_map(*sp)))) {
+            if (filtered && (admitted_visible || filtered->target)) {
                 game::MapSpawnMark m;
                 m.rgb = filtered->rgb;
                 m.layer = active_layer;
                 m.label = std::move(filtered->label);
                 out.filtered.push_back({actor, *sp, std::move(m), spawn_map(*sp), filtered->marker_filter, filtered->target});
             }
-            if (mark && (!in_view || in_view(spawn_map(*sp))))
-                out.custom.push_back({actor, std::move(*mark), spawn_map(*sp)});
+            if (mark) {
+                const glm::vec3 mark_at = spawn_map(*sp);
+                if (!in_view || in_view(mark_at)) out.custom.push_back({actor, std::move(*mark), mark_at});
+            }
         }
         if (filters && filters->ground_visible()) {
             for (const auto& object : c.ground_objects()) {
@@ -1418,19 +1431,13 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             f.spawn = *sp;
             f.at = spawn_map(*sp);
             if (!filters) return true;
-            mq::MapFilterSpawnInput filter_input;
-            filter_input.target = sp->id == c.world().target_id;
-            filter_input.group = same_group() && member(*sp);
-            filter_input.player_level = static_cast<int>(c.player_status().level);
-            filter_input.pvp_rules = c.pvp_rules();
-            filter_input.custom = custom_matcher ? &*custom_matcher : nullptr;
-            const auto mark = filters->spawn_mark(*sp, filter_input);
+            const auto mark = filters->spawn_mark(*sp, filter_input(*sp, same_group() && member(*sp)));
             if (!mark) return true;
             f.mark.rgb = mark->rgb;
             f.mark.label = std::move(mark->label);
             f.marker_filter = mark->marker_filter;
             f.target = mark->target;
-            return in_view && !in_view(f.at);
+            return !f.target && in_view && !in_view(f.at);
         });
         std::erase_if(out.ground, [&](GroundMark& g) {
             const auto found = std::find_if(c.ground_objects().begin(), c.ground_objects().end(),

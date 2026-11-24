@@ -1011,14 +1011,15 @@ the client runs it.
 
 The game's maps (map window, minimap, zone map) show the group by themselves. `/mapfilter` adds MQ2Map's own spawn and
 ground-object marks, colours, target overlays and custom searches; the command changes the shared C++ map presenter,
-so no UI-pack control is needed (`docs/commands.md`). `TargetPath` requests the server's find path when enabled and
-again when the target or zone changes; a path the player starts for another purpose takes ownership back. A ground
-label uses its actor name (for example `IT63`) when
+so no UI-pack control is needed (`docs/commands.md`). `TargetPath` requests a silent server path when enabled and
+again when the target or zone changes; it never turns the player or plays path sounds and chat. A shown or pending
+player Find takes ownership back and is not replaced. A ground label uses its actor name (for example `IT63`) when
 the client has not received an item name; Hailstone does not invent one. `map_spawn` is still asked for every other
 spawn each time a map draws (the minimap: only inside its circle) and shows those it answers for, with a colour, a map
 layer (layer switches and height filter apply) and a label, prefilled from the con colour and name. A Lua plugin's
 `map_spawn(spawn)` answers true for the defaults, or a table with `color`, `layer` and `label`. A server's
-`map_visible` denial wins over both `/mapfilter` and plugin marks.
+`map_visible` denial wins over both `/mapfilter` and plugin spawn marks; its spawn-only hook does not cover ground
+objects.
 
 #### Activity, order and compatibility
 

@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "core/byte_io.h"
+#include "game/player_path.h"
 #include "game/server_ext.h"
 #include "mock_server/harness.h"
 #include "mq_test_world.h"
@@ -66,6 +67,40 @@ TEST_CASE("server path leases: a guarded Find fallback cannot become a replaceme
     CHECK(kept->front().x == doctest::Approx(222));
     const auto fresh = rig.conn.request_quiet_path(101, {21, 3}); REQUIRE(fresh); // ordinary navigation remains available
     rig.conn.receive_zone_packet_for_test(route(333)); CHECK(rig.conn.take_quiet_path(fresh).has_value());
+}
+
+TEST_CASE("shown Find: a silent background path has no sound, chat or facing") {
+    test::Rig rig; REQUIRE(rig.to_zone());
+    auto& conn = rig.conn;
+    const auto replies = conn.find_replies();
+    (void)conn.take_sound_cues();
+    (void)conn.take_landing_effects();
+    while (conn.poll_chat()) {}
+
+    REQUIRE(conn.find_spawn(101, {false, true}));
+    CHECK(conn.take_sound_cues().empty());
+    rig.server.zone.send_reliable(route(100));
+    REQUIRE(rig.until([&] { return conn.find_replies() == replies + 1; }));
+    REQUIRE(conn.player_path().active());
+    CHECK(conn.take_sound_cues().empty());
+    CHECK_FALSE(conn.poll_chat());
+    CHECK_FALSE(conn.take_landing_effects().heading);
+    conn.stop_find_path();
+    CHECK(conn.take_sound_cues().empty());
+
+    // The ordinary Find path keeps the original feedback and facing.
+    REQUIRE(conn.find_spawn(101));
+    bool abort = false;
+    for (const auto& cue : conn.take_sound_cues())
+        abort |= cue.kind == net::SoundCue::Kind::Wave && cue.spell == game::kPathSoundAbort;
+    CHECK(abort);
+    rig.server.zone.send_reliable(route(200));
+    REQUIRE(rig.until([&] { return conn.find_replies() == replies + 2; }));
+    bool start = false;
+    for (const auto& cue : conn.take_sound_cues())
+        start |= cue.kind == net::SoundCue::Kind::Wave && cue.spell == game::kPathSoundStart;
+    CHECK(start);
+    CHECK(conn.take_landing_effects().heading.has_value());
 }
 
 TEST_CASE("Server-only NPC Find sends an advertised spawn's request and retires its route on removal") {

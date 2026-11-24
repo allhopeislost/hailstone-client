@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "core/config.h"
+#include "core/float_chars.h"
 #include "game/combat.h"
 #include "game/doors.h"
 #include "game/world_state.h"
@@ -409,32 +410,35 @@ void update_map_filter_target_path(MapFilters& filters, net::GameConnection& con
     const auto& world = connection.world();
     const auto target = world.spawns.find(world.target_id);
     const bool enabled = filters.enabled(F::TargetPath) && target != world.spawns.end();
+    auto owns_current = [&] {
+        return state.owns_path && connection.find_path_generation() == state.generation &&
+               connection.player_path().kind() == game::FindKind::Spawn &&
+               connection.player_path().target_id() == static_cast<std::int32_t>(state.target);
+    };
     if (!enabled) {
-        if (state.owns_path && connection.player_path().kind() == game::FindKind::Spawn &&
-            connection.player_path().target_id() == static_cast<std::int32_t>(state.target))
-            connection.stop_find_path();
+        if (owns_current()) connection.stop_find_path(false);
         state = {};
         return;
     }
 
     if (state.target != target->second.id || state.incarnation != target->second.incarnation) {
-        if (state.owns_path && connection.player_path().kind() == game::FindKind::Spawn &&
-            connection.player_path().target_id() == static_cast<std::int32_t>(state.target))
-            connection.stop_find_path();
+        if (owns_current()) connection.stop_find_path(false);
         state = {};
         state.target = target->second.id;
         state.incarnation = target->second.incarnation;
     }
     state.context = context;
     if (state.owns_path) {
-        if (connection.player_path().kind() != game::FindKind::Spawn ||
-            connection.player_path().target_id() != static_cast<std::int32_t>(state.target))
-            state.owns_path = false;
-        return;
+        if (!owns_current()) state.owns_path = false;
+        else return;
     }
     if (state.requested) return;
     state.requested = true;
-    state.owns_path = connection.find_spawn(state.target);
+    // A shown or pending player Find wins, even when it points at this same target. Its generation, not only its
+    // kind/id, tells us when the player has taken ownership back.
+    if (connection.has_find_path()) return;
+    state.owns_path = connection.find_spawn(state.target, {false, true});
+    if (state.owns_path) state.generation = connection.find_path_generation();
 }
 
 void run_map_filter_command(MapFilters& filters, std::string_view args, const MapFilterCommandInput& input,
@@ -488,10 +492,8 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
 
     if (is_radius(*spec)) {
         double value = 0.0;
-        if (!rest.empty() && !iequals(rest, "hide") && parse_float(rest, value) && std::isfinite(value))
-            value = std::clamp(value, 0.0, static_cast<double>(kMapFilterMaxRadius));
-        else
-            value = 0.0;
+        if (const auto parsed = core::finite_float_from_text<double>(rest)) value = *parsed;
+        value = std::clamp(value, 0.0, static_cast<double>(kMapFilterMaxRadius));
         filters.set_radius(*filter, static_cast<float>(value));
         say(std::format("{} is now set to: {:.2f}", spec->name, filters.state(*filter).radius));
         return;
@@ -545,6 +547,7 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
         say(std::format("Option '{}' needs a value.", spec->name));
         return;
     }
+    // MQ2Map flips the saved bit, not the effective value (All and the parent may still keep it hidden).
     bool enabled = !filters.state(*filter).enabled;
     if (!rest.empty()) {
         if (iequals(rest, "show")) enabled = true;
