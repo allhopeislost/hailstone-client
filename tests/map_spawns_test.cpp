@@ -4,13 +4,18 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <imgui.h>
@@ -21,6 +26,7 @@
 #include "game/server_ext.h"
 #include "game/server_ext_chain.h"
 #include "mq/map_filter.h"
+#include "fuzz_support.h"
 #include "mq_test_world.h"
 #include "scratch_dir.h"
 
@@ -71,9 +77,26 @@ int marked_vertices(lua_State* L, const std::string& code, std::optional<ImU32> 
     return n;
 }
 
+// The same frame without scanning its vertices; the benchmark times the real draw path, not the test harness.
+void draw_only(lua_State* L, const std::string& code) {
+    ImGui::GetIO().DisplaySize = ImVec2(800, 600);
+    ImGui::GetIO().DeltaTime = 1.0f / 60.0f;
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(600, 500));
+    ImGui::Begin("map");
+    if (luaL_dostring(L, code.c_str()) != LUA_OK) {
+        FAIL(lua_tostring(L, -1));
+        lua_settop(L, 0);
+    }
+    ImGui::End();
+    ImGui::Render();
+}
+
 struct MarkerFilter final : game::ServerExtension {
     bool deny_group = false, deny_npcs = false, marks = false;
     mutable int self_queries = 0, group_queries = 0;
+    mutable std::size_t visible_queries = 0;
     std::uint64_t content = 1, life = 1;
     mutable unsigned policy_queries = 0, lifecycle_queries = 0;
     std::function<void(const game::Spawn&)> on_visible, on_mark;
@@ -92,6 +115,7 @@ struct MarkerFilter final : game::ServerExtension {
     }
     bool map_visible(const net::GameConnection&, const game::Spawn& sp, std::uint32_t purpose) const override {
         if (purpose != 0) return true; // independent Find admission
+        ++visible_queries;
         if (deny_npcs && sp.is_npc) return false;
         if (sp.id == 1) ++self_queries;
         if (sp.id == 12) ++group_queries;
@@ -441,6 +465,74 @@ TEST_CASE("Map filters: NormalLabels hides only the game's map labels") {
     REQUIRE(luaL_dostring(r.L, "hs.ShowWindow('MapToolbarWnd', true)") == LUA_OK);
     CHECK(marked_vertices(r.L, kMapDraws[0], kLabel) > 0); // the editor still needs its labels
     CHECK(marked_vertices(r.L, kMapDraws[1], kLabel) == 0); // the minimap has no editor
+}
+
+TEST_CASE("test support: scoped allocation count measures global new requests") {
+    std::size_t size = 0;
+    fuzz::start_allocation_count();
+    { const std::string text(256, 'x'); size = text.size(); }
+    const auto count = fuzz::stop_allocation_count();
+    CHECK(size == 256);
+    CHECK(count.calls >= 1);
+    CHECK(count.bytes >= 257);
+}
+
+TEST_CASE("Map filters: benchmark collection cost when requested") {
+    if (!std::getenv("HAILSTONE_MAPFILTER_BENCH")) return;
+    std::printf("MAPFILTER_BENCH,sizeof_spawn=%zu\n", sizeof(game::Spawn));
+    constexpr std::array<std::string_view, 4> cases{"none", "target", "npc", "custom"};
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 2> views{
+        {"map", "hs.UI.map.Draw(0, 0, 600, 500, true)"},
+        {"minimap", "hs.DrawMinimap(300, 250, 100, 500)"}};
+
+    for (const std::size_t count : {std::size_t{1000}, std::size_t{3000}}) {
+        for (const bool provider : {false, true}) {
+            auto filter = provider ? std::make_shared<MarkerFilter>() : std::shared_ptr<MarkerFilter>{};
+            MarkerRig r(filter);
+            auto& world = net::GameConnectionTestAccess::world(*r.world.conn);
+            constexpr int kSide = 61;
+            const int rows = static_cast<int>((count + kSide - 1) / kSide);
+            for (std::size_t i = 0; i < count; ++i) {
+                const int x = static_cast<int>(i % kSide) - kSide / 2;
+                const int y = static_cast<int>(i / kSide) - rows / 2;
+                r.world.add(static_cast<std::uint32_t>(1000 + i), "Bench_NPC_" + std::to_string(i), true, 10,
+                            game::server_to_world({static_cast<float>(x * 100), static_cast<float>(y * 100), 0.0f}));
+            }
+            world.target_id = static_cast<std::uint32_t>(1000 + count / 2);
+            auto configure = [&](std::string_view name) {
+                for (const auto& spec : mq::map_filter_specs()) {
+                    r.filters.set_enabled(spec.filter, false);
+                    r.filters.set_radius(spec.filter, 0.0f);
+                    r.filters.set_marker(spec.filter, mq::MapMarker::None, 0);
+                }
+                r.filters.set_enabled(mq::MapFilter::All, true);
+                r.filters.set_enabled(mq::MapFilter::NormalLabels, true);
+                r.filters.set_custom({});
+                if (name == "target") r.filters.set_enabled(mq::MapFilter::Target, true);
+                else if (name == "npc") r.filters.set_enabled(mq::MapFilter::Npc, true);
+                else if (name == "custom") r.filters.set_custom("npc radius 500");
+            };
+            const int iterations = count == 1000 ? 120 : 60;
+            for (const auto& name : cases) {
+                configure(name);
+                for (const auto& [view, code] : views) {
+                    for (int i = 0; i < 5; ++i) draw_only(r.L, std::string(code));
+                    if (filter) filter->visible_queries = 0;
+                    fuzz::start_allocation_count();
+                    const auto start = std::chrono::steady_clock::now();
+                    for (int i = 0; i < iterations; ++i) draw_only(r.L, std::string(code));
+                    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                    const auto allocations = fuzz::stop_allocation_count();
+                    const auto queries = filter ? filter->visible_queries : 0;
+                    std::printf("MAPFILTER_BENCH,provider=%d,n=%zu,case=%.*s,view=%.*s,iterations=%d,ms=%.6f,"
+                                "allocs=%zu,bytes=%zu,visible_queries=%zu\n",
+                                provider ? 1 : 0, count, static_cast<int>(name.size()), name.data(),
+                                static_cast<int>(view.size()), view.data(), iterations, ms, allocations.calls,
+                                allocations.bytes, queries);
+                }
+            }
+        }
+    }
 }
 
 TEST_CASE("Map spawns: group marker admission is deny-wins on every map and independent of self and Find") {
