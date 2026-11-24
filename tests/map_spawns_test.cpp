@@ -324,28 +324,28 @@ TEST_CASE("Map filters: marker sizes, shapes and vector direction use the MQ geo
     const std::string minimap = "hs.DrawMinimap(300, 250, 100, 100)";
     ImVec2 center{};
     std::vector<ImVec2> points;
-    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 4); // the stock filter cross
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 8); // two 1.5-pixel cross lines
 
     r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Square, 20);
-    REQUIRE(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 12);
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 24);
     auto width = [&] {
         const auto [lo, hi] = std::minmax_element(points.begin(), points.end(), [](ImVec2 a, ImVec2 b) { return a.x < b.x; });
         return hi->x - lo->x;
     };
-    CHECK(width() == doctest::Approx(20.0f).epsilon(0.05));
+    CHECK(width() == doctest::Approx(22.5f).epsilon(0.02)); // 20 units plus the 1.5-pixel stroke and its AA fringe
     r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Square, 10);
-    CHECK(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 12);
-    CHECK(width() == doctest::Approx(10.0f).epsilon(0.05));
+    CHECK(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 24);
+    CHECK(width() == doctest::Approx(12.5f).epsilon(0.02));
     r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Diamond, 10);
-    CHECK(marked_vertices(r.L, minimap, kNpc) == 12);
+    CHECK(marked_vertices(r.L, minimap, kNpc) == 24);
     r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Triangle, 10);
-    CHECK(marked_vertices(r.L, minimap, kNpc) == 10);
-    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Ring, 10);
     CHECK(marked_vertices(r.L, minimap, kNpc) == 20);
+    r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Ring, 10);
+    CHECK(marked_vertices(r.L, minimap, kNpc) == 40);
 
     r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::None, 0);
     r.filters.set_enabled(mq::MapFilter::Vector, true);
-    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 6);
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 12);
     const auto farthest = [&] {
         return *std::max_element(points.begin(), points.end(), [&](ImVec2 a, ImVec2 b) {
             const auto ax = a.x - center.x, ay = a.y - center.y, bx = b.x - center.x, by = b.y - center.y;
@@ -354,25 +354,27 @@ TEST_CASE("Map filters: marker sizes, shapes and vector direction use the MQ geo
     };
     auto tip = farthest(); // heading 0 points north on the map
     CHECK(tip.y < center.y - 2.0f);
-    CHECK(std::abs(tip.x - center.x) < 1.0f);
+    CHECK(std::abs(tip.x - center.x) < 1.5f);
     rat.heading = 128.0f; // a quarter turn points left
-    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 6);
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 12);
     tip = farthest();
     CHECK(tip.x < center.x - 2.0f);
-    CHECK(std::abs(tip.y - center.y) < 1.0f);
+    CHECK(std::abs(tip.y - center.y) < 1.5f);
 
     r.filters.set_enabled(mq::MapFilter::Vector, false);
     r.filters.set_color(mq::MapFilter::CastRadius, 0x654321);
     r.filters.set_radius(mq::MapFilter::CastRadius, 40.0f);
     constexpr ImU32 kCircle = IM_COL32(0x65, 0x43, 0x21, 0);
-    REQUIRE(marked_vertices(r.L, minimap, kCircle, nullptr, &points) == 72); // 36 segments
-    CHECK(width() == doctest::Approx(80.0f).epsilon(0.05));
+    REQUIRE(marked_vertices(r.L, minimap, kCircle, nullptr, &points) == 144); // 36 thick line segments
+    CHECK(width() == doctest::Approx(82.5f).epsilon(0.02));
 }
 
 TEST_CASE("Map filters: minimap target geometry reaches in from outside the circle") {
     MarkerRig r;
     auto& world = net::GameConnectionTestAccess::world(*r.world.conn);
-    world.spawns.at(10).position = game::server_to_world({200.0f, 0.0f, 0.0f});
+    auto& target = world.spawns.at(10);
+    target.position = game::server_to_world({200.0f, 0.0f, 0.0f});
+    target.display_valid = false;
     r.filters.set_enabled(mq::MapFilter::Target, true);
     r.filters.set_enabled(mq::MapFilter::TargetLine, true);
     constexpr ImU32 kTarget = IM_COL32(0xc0, 0, 0, 0);
@@ -388,7 +390,9 @@ TEST_CASE("Map filters: minimap target geometry reaches in from outside the circ
     filter->deny_npcs = true;
     MarkerRig denied(filter);
     auto& denied_world = net::GameConnectionTestAccess::world(*denied.world.conn);
-    denied_world.spawns.at(10).position = game::server_to_world({200.0f, 0.0f, 0.0f});
+    auto& denied_target = denied_world.spawns.at(10);
+    denied_target.position = game::server_to_world({200.0f, 0.0f, 0.0f});
+    denied_target.display_valid = false;
     denied.filters.set_enabled(mq::MapFilter::Target, true);
     denied.filters.set_enabled(mq::MapFilter::TargetLine, true);
     denied.filters.set_radius(mq::MapFilter::TargetRadius, 150.0f);

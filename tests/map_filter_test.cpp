@@ -11,6 +11,7 @@
 #include "game/server_ext.h"
 #include "game/world_state.h"
 #include "mq/map_filter.h"
+#include "mock_server/harness.h"
 #include "mq_test_world.h"
 #include "scratch_dir.h"
 
@@ -257,64 +258,70 @@ TEST_CASE("Map filters: settings round-trip globally and clamp damaged values") 
 }
 
 TEST_CASE("Map filters: TargetPath is silent and yields to player-started paths") {
-    mq_test::World world("hailstone_map_filter_target_path");
+    test::Rig rig; REQUIRE(rig.to_zone());
+    auto& conn = rig.conn;
+    auto& world = net::GameConnectionTestAccess::world(conn);
+    REQUIRE(world.spawns.contains(101));
+    REQUIRE(world.spawns.contains(102));
+    world.target_id = 101;
+    const auto request_base = net::GameConnectionTestAccess::find_request_count(conn);
     MapFilters filters;
     filters.set_enabled(MapFilter::Target, true);
     filters.set_enabled(MapFilter::TargetPath, true);
     MapFilterTargetPathState state;
-    (void)world.conn->take_sound_cues();
+    (void)conn.take_sound_cues();
 
-    update_map_filter_target_path(filters, *world.conn, state);
+    update_map_filter_target_path(filters, conn, state);
     REQUIRE(state.requested);
     CHECK(state.owns_path);
     CHECK(state.generation != 0);
-    CHECK(world.conn->player_path().kind() == game::FindKind::Spawn);
-    CHECK(world.conn->player_path().target_id() == 10);
-    CHECK(net::GameConnectionTestAccess::find_request_count(*world.conn) == 1);
-    CHECK(world.conn->take_sound_cues().empty());
+    CHECK(conn.player_path().kind() == game::FindKind::Spawn);
+    CHECK(conn.player_path().target_id() == 101);
+    CHECK(net::GameConnectionTestAccess::find_request_count(conn) == request_base + 1);
+    CHECK(conn.take_sound_cues().empty());
 
-    update_map_filter_target_path(filters, *world.conn, state);
+    update_map_filter_target_path(filters, conn, state);
     CHECK(state.owns_path);
-    CHECK(net::GameConnectionTestAccess::find_request_count(*world.conn) == 1);
+    CHECK(net::GameConnectionTestAccess::find_request_count(conn) == request_base + 1);
 
-    net::GameConnectionTestAccess::world(*world.conn).target_id = 12;
-    update_map_filter_target_path(filters, *world.conn, state);
+    world.target_id = 102;
+    update_map_filter_target_path(filters, conn, state);
     CHECK(state.owns_path);
-    CHECK(world.conn->player_path().target_id() == 12);
-    CHECK(net::GameConnectionTestAccess::find_request_count(*world.conn) == 2);
-    CHECK(world.conn->take_sound_cues().empty()); // replacing our own silent path is silent too
+    CHECK(conn.player_path().target_id() == 102);
+    CHECK(net::GameConnectionTestAccess::find_request_count(conn) == request_base + 2);
+    CHECK(conn.take_sound_cues().empty()); // replacing our own silent path is silent too
 
     // A path the player starts takes ownership back, even across a later target change.
-    world.conn->find_map_location({100.0f, 0.0f, 0.0f});
-    (void)world.conn->take_sound_cues();
-    const auto manual_requests = net::GameConnectionTestAccess::find_request_count(*world.conn);
-    update_map_filter_target_path(filters, *world.conn, state);
+    conn.find_map_location({100.0f, 0.0f, 0.0f});
+    (void)conn.take_sound_cues();
+    const auto manual_requests = net::GameConnectionTestAccess::find_request_count(conn);
+    update_map_filter_target_path(filters, conn, state);
     CHECK_FALSE(state.owns_path);
-    CHECK(world.conn->player_path().kind() == game::FindKind::MapLocation);
-    net::GameConnectionTestAccess::world(*world.conn).target_id = 10;
-    update_map_filter_target_path(filters, *world.conn, state);
+    CHECK(conn.player_path().kind() == game::FindKind::MapLocation);
+    world.target_id = 101;
+    update_map_filter_target_path(filters, conn, state);
     CHECK_FALSE(state.owns_path);
-    CHECK(world.conn->player_path().kind() == game::FindKind::MapLocation);
-    CHECK(net::GameConnectionTestAccess::find_request_count(*world.conn) == manual_requests);
+    CHECK(conn.player_path().kind() == game::FindKind::MapLocation);
+    CHECK(net::GameConnectionTestAccess::find_request_count(conn) == manual_requests);
     filters.set_enabled(MapFilter::TargetPath, false);
-    update_map_filter_target_path(filters, *world.conn, state);
-    CHECK(world.conn->player_path().kind() == game::FindKind::MapLocation); // not ours to stop
-    world.conn->stop_find_path();
-    (void)world.conn->take_sound_cues();
+    update_map_filter_target_path(filters, conn, state);
+    CHECK(conn.player_path().kind() == game::FindKind::MapLocation); // not ours to stop
+    conn.stop_find_path();
+    (void)conn.take_sound_cues();
     filters.set_enabled(MapFilter::TargetPath, true);
-    update_map_filter_target_path(filters, *world.conn, state);
+    update_map_filter_target_path(filters, conn, state);
     REQUIRE(state.owns_path);
-    CHECK(world.conn->player_path().target_id() == 10);
+    CHECK(conn.player_path().target_id() == 101);
 
     // The same kind/id is not enough to keep ownership: the player's new request has a new generation.
-    REQUIRE(world.conn->find_spawn(10));
-    (void)world.conn->take_sound_cues();
-    update_map_filter_target_path(filters, *world.conn, state);
+    REQUIRE(conn.find_spawn(101));
+    (void)conn.take_sound_cues();
+    update_map_filter_target_path(filters, conn, state);
     CHECK_FALSE(state.owns_path);
     filters.set_enabled(MapFilter::TargetPath, false);
-    update_map_filter_target_path(filters, *world.conn, state);
-    CHECK(world.conn->player_path().kind() == game::FindKind::Spawn);
-    CHECK(world.conn->player_path().target_id() == 10);
+    update_map_filter_target_path(filters, conn, state);
+    CHECK(conn.player_path().kind() == game::FindKind::Spawn);
+    CHECK(conn.player_path().target_id() == 101);
 }
 
 TEST_CASE("Map filters: TargetPath refreshes for a new target incarnation and interaction context") {
