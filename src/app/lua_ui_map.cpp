@@ -54,6 +54,7 @@
 #include "game/atlas.h"
 #include "game/combat.h"
 #include "game/coords.h"
+#include "game/doors.h"
 #include "game/map_data.h"
 #include "game/map_files.h"
 #include "game/mechanics/character.h"
@@ -63,6 +64,8 @@
 #include "game/world_state.h"
 #include "game/zone_names.h"
 #include "game/zone_routes.h"
+#include "mq/map_filter.h"
+#include "mq/spawn_search.h"
 #include "net/game_connection.h"
 #include "plugin/lua_keep.h"
 #include "ui/dev_screens.h"
@@ -1116,15 +1119,29 @@ struct GroupSpawn {
     net::GameConnection::ActorRef actor;
     game::Spawn spawn;
 };
+struct FilteredSpawn {
+    net::GameConnection::ActorRef actor;
+    game::Spawn spawn;
+    game::MapSpawnMark mark;
+    glm::vec3 at{0.0f};
+};
+struct GroundMark {
+    std::uint32_t drop_id = 0;
+    game::GroundObject object;
+    game::MapSpawnMark mark;
+    glm::vec3 at{0.0f};
+};
 struct MapMarkers {
     std::vector<GroupSpawn> group;
     std::vector<SpawnMark> custom;
+    std::vector<FilteredSpawn> filtered;
+    std::vector<GroundMark> ground;
 };
 
-// Collect both kinds before drawing or choosing a hover target. Providers may synchronously change the world,
-// roster or their own permissions: only owned values and issued actor references cross those calls. The local
-// player's direct marker never enters this path, and MARKER admission does not consult Find/navigation flags.
-MapMarkers map_markers(const UiHost& h, bool show_group, bool show_custom,
+// Collect every marker source before drawing. Providers may synchronously change the world, roster or their own
+// permissions: only owned values and issued actor references cross those calls. The local player's direct marker
+// never enters this path, and MARKER admission does not consult Find/navigation flags.
+MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, bool show_group, bool show_custom,
                        const std::function<bool(const glm::vec3&)>& in_view = {}) {
     static thread_local bool collecting = false;
     if (!h.conn || collecting) return {};
@@ -1145,6 +1162,13 @@ MapMarkers map_markers(const UiHost& h, bool show_group, bool show_custom,
         };
         const auto stamp = source();
         if (!stamp) return {};
+        if (filters) filters->observe_player(c.world().player());
+        std::optional<mq::SpawnSearchMatcher> custom_matcher;
+        if (filters && filters->custom_enabled() && filters->custom_search()) {
+            mq::SearchSources search_sources = mq::sources_of(c);
+            if (h.tlo_context) search_sources.can_see = h.tlo_context().can_see;
+            custom_matcher.emplace(*filters->custom_search(), c.world(), search_sources);
+        }
         std::array<std::string, game::kGroupSlots> names{};
         const bool grouped = show_group && c.group().active;
         if (grouped)
@@ -1188,10 +1212,30 @@ MapMarkers map_markers(const UiHost& h, bool show_group, bool show_custom,
                 return candidate && *candidate == actor;
             });
             const bool custom = show_custom && (!in_view || in_view(spawn_map(*sp)));
-            if (!group && !custom) continue;
+            std::optional<mq::MapFilterMark> filtered;
+            if (filters && (!in_view || in_view(spawn_map(*sp)))) {
+                mq::MapFilterSpawnInput filter_input;
+                filter_input.target = sp->id == c.world().target_id;
+                filter_input.group = group;
+                filter_input.player_level = static_cast<int>(c.player_status().level);
+                filter_input.pvp_rules = c.pvp_rules();
+                filter_input.custom = custom_matcher ? &*custom_matcher : nullptr;
+                filtered = filters->spawn_mark(*sp, filter_input);
+            }
+            if (!group && !custom && !filtered) continue;
             const bool allowed = c.server_ext().map_visible(c, *sp, 0); // HAILSTONE_MAP_VISIBLE_MARKER
             sp = copy(actor);
             if (!sp || !allowed) continue;
+            if (filters && (!in_view || in_view(spawn_map(*sp)))) {
+                mq::MapFilterSpawnInput filter_input;
+                filter_input.target = sp->id == c.world().target_id;
+                filter_input.group = group;
+                filter_input.player_level = static_cast<int>(c.player_status().level);
+                filter_input.pvp_rules = c.pvp_rules();
+                filter_input.custom = custom_matcher ? &*custom_matcher : nullptr;
+                filtered = filters->spawn_mark(*sp, filter_input);
+            }
+            if (!group && !custom && !filtered) continue;
             std::optional<game::MapSpawnMark> mark;
             if (custom) {
                 game::MapSpawnMark d;
@@ -1202,9 +1246,28 @@ MapMarkers map_markers(const UiHost& h, bool show_group, bool show_custom,
                 sp = copy(actor);
                 if (!sp) continue;
             }
-            if (group && same_group() && member(*sp)) out.group.push_back({actor, *sp});
+            // A filtered mark replaces Hailstone's stock group dot for that actor, so one spawn is not drawn twice.
+            if (group && !filtered && same_group() && member(*sp)) out.group.push_back({actor, *sp});
+            if (filtered && (!in_view || in_view(spawn_map(*sp)))) {
+                game::MapSpawnMark m;
+                m.rgb = filtered->rgb;
+                m.layer = active_layer;
+                m.label = std::move(filtered->label);
+                out.filtered.push_back({actor, *sp, std::move(m), spawn_map(*sp)});
+            }
             if (mark && (!in_view || in_view(spawn_map(*sp))))
                 out.custom.push_back({actor, std::move(*mark), spawn_map(*sp)});
+        }
+        if (filters && filters->ground_visible()) {
+            for (const auto& object : c.ground_objects()) {
+                const glm::vec3 at = game::world_to_map(object.position);
+                if (in_view && !in_view(at)) continue;
+                game::MapSpawnMark mark;
+                mark.rgb = filters->state(mq::MapFilter::Ground).rgb;
+                mark.layer = active_layer;
+                mark.label = mq::MapFilters::ground_label(object);
+                out.ground.push_back({object.drop_id, object, std::move(mark), at});
+            }
         }
         // The final source query can itself reenter. Validate context, actors and roster after it, without any
         // further provider calls, so a later member's callback cannot leave an earlier member's stale snapshot.
@@ -1231,6 +1294,33 @@ MapMarkers map_markers(const UiHost& h, bool show_group, bool show_custom,
             m.at = spawn_map(*sp);
             return in_view && !in_view(m.at);
         });
+        std::erase_if(out.filtered, [&](FilteredSpawn& f) {
+            auto sp = copy(f.actor);
+            if (!sp) return true;
+            f.spawn = *sp;
+            f.at = spawn_map(*sp);
+            if (!filters) return true;
+            mq::MapFilterSpawnInput filter_input;
+            filter_input.target = sp->id == c.world().target_id;
+            filter_input.group = same_group() && member(*sp);
+            filter_input.player_level = static_cast<int>(c.player_status().level);
+            filter_input.pvp_rules = c.pvp_rules();
+            filter_input.custom = custom_matcher ? &*custom_matcher : nullptr;
+            const auto mark = filters->spawn_mark(*sp, filter_input);
+            if (!mark) return true;
+            f.mark.rgb = mark->rgb;
+            f.mark.label = std::move(mark->label);
+            return in_view && !in_view(f.at);
+        });
+        std::erase_if(out.ground, [&](GroundMark& g) {
+            const auto found = std::find_if(c.ground_objects().begin(), c.ground_objects().end(),
+                                            [&](const game::GroundObject& object) { return object.drop_id == g.drop_id; });
+            if (found == c.ground_objects().end()) return true;
+            g.object = *found;
+            g.at = game::world_to_map(g.object.position);
+            g.mark.label = mq::MapFilters::ground_label(g.object);
+            return in_view && !in_view(g.at);
+        });
         return out;
     } catch (...) {
         // A failing provider cannot unwind through a Lua draw entrypoint or turn a failed filter into allowance.
@@ -1239,7 +1329,8 @@ MapMarkers map_markers(const UiHost& h, bool show_group, bool show_custom,
 }
 
 // A mark as the view shows its labels: on a shown layer and, with the height filter, near the player's feet.
-bool mark_shown(const game::MapView& v, const SpawnMark& m, std::optional<float> feet) {
+template <typename T>
+bool mark_shown(const game::MapView& v, const T& m, std::optional<float> feet) {
     if (!v.layer_shown(m.mark.layer)) return false;
     if (!v.z_filter || !feet) return true;
     return *feet - static_cast<float>(v.min_z) <= m.at.z && m.at.z <= *feet + static_cast<float>(v.max_z);
@@ -1300,6 +1391,20 @@ int DrawMap(lua_State* L) {
     v.precalc(me ? std::optional<glm::vec2>(glm::vec2(*me)) : std::nullopt, s.label_box(h), s.find_box(h));
     auto T = [&](float x, float y) { return v.transform(x, y, cw, ch); };
     bool edit = s.edit_mode();
+    const bool normal_labels = !h.map_filters || h.map_filters->enabled(mq::MapFilter::NormalLabels);
+    auto draw_filtered_mark = [&](const auto& mk, bool show_label) {
+        if (!mark_shown(v, mk, feet)) return;
+        glm::vec2 p = T(mk.at.x, mk.at.y);
+        const float gx = std::trunc(p.x), gy = std::trunc(p.y);
+        const ImU32 col = faded(color(mk.mark.rgb, 0xff), v.z_fade(mk.at.z, feet));
+        line(gx - 2, gy, gx + 3, gy, col);
+        line(gx, gy - 2, gx, gy + 3, col);
+        if (!show_label || mk.mark.label.empty()) return;
+        MapFont f = map_font(1);
+        float fs = f.font ? f.font->LegacySize / f.scale * k : ImGui::GetFontSize();
+        ImVec2 tp = S(gx + 4, gy - std::trunc(f.height / 2));
+        dl->AddText(f.font, fs, ImVec2(std::trunc(tp.x), std::trunc(tp.y)), col, mk.mark.label.c_str(), nullptr, 300.0f * k);
+    };
 
     // The mouse in the original's pixels; the drag's pan follows it (CMapViewWnd::OnProcessFrame).
     ImVec2 mouse = ImGui::GetMousePos();
@@ -1328,7 +1433,7 @@ int DrawMap(lua_State* L) {
     const auto* path = s.path(h);
     const bool have_path = path != nullptr;
     const auto find_points = path ? path->points() : std::vector<glm::vec3>{};
-    auto markers = v.current_zone && me ? map_markers(h, v.show_group, true) : MapMarkers{};
+    auto markers = v.current_zone && me ? map_markers(h, h.map_filters, v.active_layer, v.show_group, true) : MapMarkers{};
     const auto& members = markers.group;
     const auto& marks = markers.custom;
     const GroupSpawn* hover_member = nullptr;
@@ -1356,7 +1461,7 @@ int DrawMap(lua_State* L) {
             }
         }
     }
-    if (mouse_in && !hover_member && !hover_mark) {
+    if (mouse_in && normal_labels && !hover_member && !hover_mark) {
         float best_label = 20.0f, best_line = 3.0f;
         for (auto& l : v.labels) {
             if (!v.label_shown(l, feet)) continue;
@@ -1432,7 +1537,7 @@ int DrawMap(lua_State* L) {
     // The labels.
     game::MapLabel* marked = edit ? v.marked_label : nullptr;
     for (auto& l : v.labels) {
-        if (!v.label_shown(l, feet)) continue;
+        if (!normal_labels || !v.label_shown(l, feet)) continue;
         glm::vec2 p = T(l.pos.x, l.pos.y);
         bool lit = &l == s.hover_label || &l == marked;
         ImU32 col = lit ? color(kHighlight) : faded(color(l.color), v.z_fade(l.pos.z, feet));
@@ -1465,6 +1570,10 @@ int DrawMap(lua_State* L) {
         ImVec2 at = S(tx, ty);
         dl->AddText(f.font, fs, ImVec2(std::trunc(at.x), std::trunc(at.y)), col, l.text.c_str(), nullptr, 300.0f * k);
     }
+
+    // /mapfilter's own marks: MQ2Map's small plus and label, in the option's colour.
+    for (const auto& mk : markers.filtered) draw_filtered_mark(mk, true);
+    for (const auto& mk : markers.ground) draw_filtered_mark(mk, true);
 
     // A plugin's spawns: a small plus in the mark's colour, named as the labels are (the Labels button, or hovered).
     for (const auto& mk : marks) {
@@ -1612,6 +1721,7 @@ void draw_zone_view(MapState& s, UiHost& h, const ZoneView& zv) {
     // Another zone's map (an atlas zone link, hs.ShowZoneMap) is drawn without the player, the find path and the
     // height fade, which belong to the player's zone.
     auto feet = v.current_zone ? s.feet_z(h) : std::nullopt;
+    const bool normal_labels = !h.map_filters || h.map_filters->enabled(mq::MapFilter::NormalLabels);
     const glm::vec2 here = zv.P(me->x, me->y);
     // The minimap's square: in a busy zone's thousands of lines, most are outside it.
     const float reach = zv.reach > 0.0f ? zv.reach + 1.0f : 0.0f;
@@ -1624,7 +1734,7 @@ void draw_zone_view(MapState& s, UiHost& h, const ZoneView& zv) {
             seg(zv.P(l.start.x, l.start.y), zv.P(l.end.x, l.end.y), faded(ink(l.color), v.z_fade(l.start.z, l.end.z, feet)), w);
     if (v.line_active) seg(zv.P(v.current_point.x, v.current_point.y), here, ink(v.current_color), w);
     lap.mark("map view lines");
-    if (zv.labels) {
+    if (zv.labels && normal_labels) {
         ImFont* f = ImGui::GetFont();
         float fs = ImGui::GetFontSize();
         for (const auto& l : v.labels) {
@@ -1680,8 +1790,28 @@ void draw_zone_view(MapState& s, UiHost& h, const ZoneView& zv) {
     // label may reach in from a mark outside), so all are.
     auto in_circle = [&](const glm::vec3& m) { return inside(zv.P(m.x, m.y)); };
     const auto markers = v.current_zone
-        ? map_markers(h, v.show_group, true, r > 0.0f ? std::function<bool(const glm::vec3&)>(in_circle) : nullptr)
+        ? map_markers(h, h.map_filters, v.active_layer, v.show_group, true,
+                      r > 0.0f ? std::function<bool(const glm::vec3&)>(in_circle) : nullptr)
         : MapMarkers{};
+    auto draw_filtered_mark = [&](const auto& mk) {
+        if (!mark_shown(v, mk, feet)) return;
+        const glm::vec2 p = zv.P(mk.at.x, mk.at.y);
+        if (!inside(p)) return;
+        const ImVec2 q = at(p);
+        const float fade = v.z_fade(mk.at.z, feet);
+        const ImU32 col = faded(color(mk.mark.rgb, 255), fade);
+        dl->AddLine(ImVec2(q.x - 2.0f * w, q.y), ImVec2(q.x + 3.0f * w, q.y), col, w);
+        dl->AddLine(ImVec2(q.x, q.y - 2.0f * w), ImVec2(q.x, q.y + 3.0f * w), col, w);
+        if (!zv.labels || mk.mark.label.empty()) return;
+        ImFont* f = ImGui::GetFont();
+        float fs = ImGui::GetFontSize();
+        ImVec2 tp(q.x + 4.0f * w, q.y - fs / 2);
+        dl->AddText(f, fs, ImVec2(tp.x + 1, tp.y + 1), faded(IM_COL32(0, 0, 0, 200), fade), mk.mark.label.c_str());
+        dl->AddText(f, fs, tp, col, mk.mark.label.c_str());
+    };
+    for (const auto& mk : markers.filtered) draw_filtered_mark(mk);
+    for (const auto& mk : markers.ground) draw_filtered_mark(mk);
+    lap.mark("map view filter marks");
     if (v.current_zone)
         for (const auto& mk : markers.custom) {
             if (!mark_shown(v, mk, feet)) continue;

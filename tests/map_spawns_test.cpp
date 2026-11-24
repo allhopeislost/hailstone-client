@@ -17,6 +17,7 @@
 #include "app/lua_ui.h"
 #include "game/server_ext.h"
 #include "game/server_ext_chain.h"
+#include "mq/map_filter.h"
 #include "mq_test_world.h"
 #include "scratch_dir.h"
 
@@ -66,7 +67,7 @@ int marked_vertices(lua_State* L, const std::string& code, std::optional<ImU32> 
 }
 
 struct MarkerFilter final : game::ServerExtension {
-    bool deny_group = false, marks = false;
+    bool deny_group = false, deny_rat = false, marks = false;
     mutable int self_queries = 0, group_queries = 0;
     std::uint64_t content = 1, life = 1;
     mutable unsigned policy_queries = 0, lifecycle_queries = 0;
@@ -86,6 +87,7 @@ struct MarkerFilter final : game::ServerExtension {
     }
     bool map_visible(const net::GameConnection&, const game::Spawn& sp, std::uint32_t purpose) const override {
         if (purpose != 0) return true; // independent Find admission
+        if (sp.id == 10 && deny_rat) return false;
         if (sp.id == 1) ++self_queries;
         if (sp.id == 12) ++group_queries;
         const auto callback = on_visible;
@@ -114,9 +116,10 @@ struct MarkerRig {
     test::ScratchDir scratch{"map_marker_filter"};
     ImGuiContext* context = nullptr;
     app::UiHost host;
+    mq::MapFilters filters;
     std::unique_ptr<app::UiApi> api;
     lua_State* L = nullptr;
-    explicit MarkerRig(std::shared_ptr<game::ServerExtension> extension = {})
+    explicit MarkerRig(std::shared_ptr<game::ServerExtension> extension = {}, bool map_label = false)
         : world("map_marker_filter_world", options(std::move(extension))) {
         context = ImGui::CreateContext();
         ImGui::GetIO().IniFilename = nullptr;
@@ -125,6 +128,10 @@ struct MarkerRig {
         host.in_game = host.ui_ready = host.feet_valid = true;
         host.game = world.game.get(); host.conn = world.conn.get(); host.zone_short_name = "qeynos2";
         host.maps_dir = scratch.path() / "maps";
+        if (map_label) {
+            std::filesystem::create_directories(host.maps_dir);
+            std::ofstream(host.maps_dir / "qeynos2.txt") << "P 0, 0, 0,  255, 0, 0,  1,  Test_Label\n";
+        }
         std::ofstream(scratch.path() / "UI.ini") << "[MapViewWnd]\nShowGroup=true\n"
             "GroupColor.red=74\nGroupColor.green=145\nGroupColor.blue=210\n"
             "MyColor.red=216\nMyColor.green=79\nMyColor.blue=57\n";
@@ -219,6 +226,7 @@ TEST_CASE("Map lines: the minimap draws the lines that cross its circle, however
         host.zone_short_name = "qeynos2";
         host.global_maps_dir = scratch.path() / "maps"; // read by the map state (the server's comes with the ini)
         host.feet_valid = true;
+        host.map_filters = &filters;
         app::UiApi api(host);
         api.begin_frame();
         lua_State* L = luaL_newstate();
@@ -234,6 +242,55 @@ TEST_CASE("Map lines: the minimap draws the lines that cross its circle, however
         lua_close(L);
     }
     ImGui::DestroyContext(ctx);
+}
+
+TEST_CASE("Map filters: command state draws spawn marks on every map view") {
+    MarkerRig r;
+    constexpr ImU32 kNpc = IM_COL32(0x40, 0x40, 0x40, 0);
+    r.filters.set_enabled(mq::MapFilter::Npc, true);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kNpc) > 0);
+
+    r.filters.set_enabled(mq::MapFilter::All, false);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kNpc) == 0);
+    r.filters.set_enabled(mq::MapFilter::All, true);
+    r.filters.set_enabled(mq::MapFilter::Npc, false);
+    r.filters.set_enabled(mq::MapFilter::Target, true);
+    constexpr ImU32 kTarget = IM_COL32(0xc0, 0, 0, 0);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kTarget) > 0);
+}
+
+TEST_CASE("Map filters: ground objects draw without a full item database") {
+    MarkerRig r;
+    game::GroundObject object;
+    object.drop_id = 99;
+    object.name = "IT63_ACTORDEF";
+    object.position = game::server_to_world({10.0f, 0.0f, 0.0f});
+    net::GameConnectionTestAccess::ground_objects(*r.world.conn).push_back(object);
+    r.filters.set_enabled(mq::MapFilter::Ground, true);
+    constexpr ImU32 kGround = IM_COL32(0xc0, 0xc0, 0xc0, 0);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kGround) > 0);
+}
+
+TEST_CASE("Map filters: server marker denial wins over command filters") {
+    auto filter = std::make_shared<MarkerFilter>();
+    MarkerRig r(filter);
+    r.filters.set_enabled(mq::MapFilter::Npc, true);
+    constexpr ImU32 kNpc = IM_COL32(0x40, 0x40, 0x40, 0);
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kNpc) > 0);
+    filter->deny_rat = true;
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kNpc) == 0);
+    filter->deny_rat = false;
+    for (const auto& draw : kMapDraws) CHECK(marked_vertices(r.L, draw, kNpc) > 0);
+}
+
+TEST_CASE("Map filters: NormalLabels hides only the game's map labels") {
+    MarkerRig r({}, true);
+    constexpr ImU32 kLabel = IM_COL32(255, 0, 0, 0);
+    CHECK(marked_vertices(r.L, kMapDraws[0], kLabel) > 0);
+    CHECK(marked_vertices(r.L, kMapDraws[1], kLabel) > 0);
+    r.filters.set_enabled(mq::MapFilter::NormalLabels, false);
+    CHECK(marked_vertices(r.L, kMapDraws[0], kLabel) == 0);
+    CHECK(marked_vertices(r.L, kMapDraws[1], kLabel) == 0);
 }
 
 TEST_CASE("Map spawns: group marker admission is deny-wins on every map and independent of self and Find") {

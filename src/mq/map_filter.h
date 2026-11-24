@@ -17,7 +17,7 @@
 #include "core/config.h"
 #include "mq/spawn_search.h"
 
-namespace hailstone::game { struct GuildState; struct Spawn; struct WorldState; }
+namespace hailstone::game { struct GuildState; struct GroundObject; struct Spawn; struct WorldState; }
 
 namespace hailstone::mq {
 
@@ -132,6 +132,13 @@ public:
     const glm::vec3& camp_anchor() const { return camp_anchor_; }
     const glm::vec3& pull_anchor() const { return pull_anchor_; }
 
+    // The shared map presenter asks these once per collected spawn. A target is admitted before the type filters,
+    // then a custom search replaces them; otherwise the MQ2Map type rules decide. Group colour is applied last,
+    // while the target colour wins over it.
+    std::optional<MapFilterMark> spawn_mark(const game::Spawn& spawn, const MapFilterSpawnInput& input) const;
+    bool ground_visible() const;
+    static std::string ground_label(const game::GroundObject& object);
+
 private:
     static constexpr std::size_t kCount = static_cast<std::size_t>(MapFilter::Last);
     std::array<MapFilterState, kCount> states_{};
@@ -151,6 +158,22 @@ private:
 struct MapFilterCommandInput {
     const game::WorldState* world = nullptr;
     const game::GuildState* guild = nullptr;
+};
+
+struct MapFilterMark {
+    MapFilter color_filter = MapFilter::Invalid;
+    MapFilter marker_filter = MapFilter::Invalid;
+    std::uint32_t rgb = 0;
+    std::string label;
+    bool target = false;
+};
+
+struct MapFilterSpawnInput {
+    bool target = false;
+    bool group = false;
+    int player_level = 0;
+    std::int32_t pvp_rules = 0;
+    const SpawnSearchMatcher* custom = nullptr;
 };
 
 // /mapfilter, help and status. `say` receives one chat line at a time; the caller decides colour and squelch handling.

@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "core/config.h"
+#include "game/combat.h"
+#include "game/doors.h"
 #include "game/world_state.h"
 #include "mq/map_filter.h"
 #include "scratch_dir.h"
@@ -266,4 +268,188 @@ TEST_CASE("Map filters: a restored camp radius starts at the first observed play
     world.spawns.emplace(1, player);
     filters.observe_player(world.player());
     CHECK(filters.camp_anchor() == player.position);
+}
+
+TEST_CASE("Map filters: spawn types, named filtering and target precedence") {
+    MapFilters filters;
+    MapFilterSpawnInput input;
+    input.player_level = 50;
+
+    game::Spawn rat;
+    rat.id = 10;
+    rat.name = "a_rat01";
+    rat.is_npc = true;
+    CHECK_FALSE(filters.spawn_mark(rat, input));
+    filters.set_enabled(MapFilter::Npc, true);
+    auto mark = filters.spawn_mark(rat, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::Npc);
+    CHECK(mark->rgb == 0x404040u);
+
+    game::Spawn named = rat;
+    named.id = 11;
+    named.name = "#Lord_Rat00";
+    filters.set_enabled(MapFilter::Named, true);
+    CHECK_FALSE(filters.spawn_mark(rat, input));
+    mark = filters.spawn_mark(named, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::Named);
+
+    filters.set_enabled(MapFilter::Npc, false);
+    filters.set_enabled(MapFilter::Named, false);
+    filters.set_enabled(MapFilter::Target, true);
+    input.target = true;
+    mark = filters.spawn_mark(rat, input);
+    REQUIRE(mark);
+    CHECK(mark->target);
+    CHECK(mark->color_filter == MapFilter::Target);
+    CHECK(mark->rgb == 0xc00000u);
+
+    game::Spawn mount = rat;
+    mount.name = "Rat`s_Mount00";
+    mount.rider_id = rat.id;
+    filters.set_enabled(MapFilter::Mount, true);
+    input.target = false;
+    mark = filters.spawn_mark(mount, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::Mount);
+
+    game::Spawn pet = rat;
+    pet.name = "Rat_pet00";
+    pet.pet_owner_id = rat.id;
+    filters.set_enabled(MapFilter::Pet, true);
+    mark = filters.spawn_mark(pet, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::Pet);
+
+    game::Spawn merc = rat;
+    merc.name = "Mercenary01";
+    merc.mercenary = true;
+    filters.set_enabled(MapFilter::Mercenary, true);
+    mark = filters.spawn_mark(merc, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::Mercenary);
+}
+
+TEST_CASE("Map filters: corpses, consider colours and group colour precedence") {
+    MapFilters filters;
+    MapFilterSpawnInput input;
+    input.player_level = 50;
+    game::Spawn corpse;
+    corpse.id = 20;
+    corpse.name = "Tester`s_corpse00";
+    corpse.is_npc = true;
+    corpse.is_corpse = true;
+    corpse.deity = 1;
+    filters.set_enabled(MapFilter::Corpse, true);
+    CHECK_FALSE(filters.spawn_mark(corpse, input));
+    filters.set_enabled(MapFilter::PcCorpse, true);
+    auto mark = filters.spawn_mark(corpse, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::PcCorpse);
+    CHECK(mark->marker_filter == MapFilter::Corpse);
+    corpse.deity = 0;
+    CHECK_FALSE(filters.spawn_mark(corpse, input));
+    filters.set_enabled(MapFilter::NpcCorpse, true);
+    mark = filters.spawn_mark(corpse, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::NpcCorpse);
+
+    game::Spawn player;
+    player.id = 30;
+    player.name = "OtherPlayer";
+    player.level = 1;
+    filters.set_enabled(MapFilter::Pc, true);
+    filters.set_enabled(MapFilter::PcConColor, true);
+    mark = filters.spawn_mark(player, input);
+    REQUIRE(mark);
+    CHECK(mark->rgb == game::con_rgb(game::standard_con(1, 50)));
+    filters.set_enabled(MapFilter::Group, true);
+    input.group = true;
+    mark = filters.spawn_mark(player, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::Group);
+    CHECK(mark->rgb == 0x0080c0u);
+    input.target = true;
+    mark = filters.spawn_mark(player, input);
+    REQUIRE(mark);
+    CHECK(mark->color_filter == MapFilter::Target);
+}
+
+TEST_CASE("Map filters: custom search replaces type filters but not the target") {
+    game::WorldState world;
+    world.player_id = 1;
+    game::Spawn me;
+    me.id = 1;
+    me.name = "Tester";
+    world.spawns.emplace(1, me);
+    game::Spawn rat;
+    rat.id = 10;
+    rat.name = "a_rat01";
+    rat.is_npc = true;
+    rat.position = glm::vec3(5.0f, 0.0f, 0.0f);
+    world.spawns.emplace(10, rat);
+    game::Spawn player;
+    player.id = 11;
+    player.name = "OtherPlayer";
+    player.position = glm::vec3(5.0f, 0.0f, 0.0f);
+    world.spawns.emplace(11, player);
+
+    MapFilters filters;
+    filters.set_enabled(MapFilter::Pc, true);
+    filters.set_custom("npc radius 10");
+    const mq::SpawnSearchMatcher matcher(*filters.custom_search(), world, {});
+    MapFilterSpawnInput input;
+    input.custom = &matcher;
+    CHECK(filters.spawn_mark(rat, input).has_value());
+    CHECK_FALSE(filters.spawn_mark(player, input).has_value());
+    filters.set_enabled(MapFilter::Target, true);
+    input.target = true;
+    CHECK(filters.spawn_mark(player, input).has_value());
+}
+
+TEST_CASE("Map filters: ground objects use their actor label without inventing an item name") {
+    MapFilters filters;
+    CHECK_FALSE(filters.ground_visible());
+    filters.set_enabled(MapFilter::Ground, true);
+    CHECK(filters.ground_visible());
+    game::GroundObject object;
+    object.name = "IT63_ACTORDEF";
+    CHECK(MapFilters::ground_label(object) == "IT63");
+    object.name = "FORGE_ACTORDEF";
+    CHECK(MapFilters::ground_label(object) == "FORGE");
+    object.name.clear();
+    CHECK(MapFilters::ground_label(object) == "Ground item");
+}
+
+TEST_CASE("Spawn search matcher: prepared nopcnear candidates survive spawn replacement") {
+    game::WorldState world;
+    world.player_id = 1;
+    game::Spawn me;
+    me.id = 1;
+    me.name = "Tester";
+    me.position = glm::vec3(100.0f, 0.0f, 0.0f);
+    world.spawns.emplace(1, me);
+    game::Spawn nearby;
+    nearby.id = 2;
+    nearby.name = "Nearby";
+    nearby.position = glm::vec3(1.0f, 0.0f, 0.0f);
+    world.spawns.emplace(2, nearby);
+    game::Spawn rat;
+    rat.id = 10;
+    rat.name = "a_rat01";
+    rat.is_npc = true;
+    world.spawns.emplace(10, rat);
+
+    const auto search = parse_spawn_search("npc nopcnear 5");
+    const SpawnSearchMatcher matcher(search, world, {});
+    CHECK_FALSE(matcher.matches(rat));
+    world.spawns.erase(2);
+    nearby.id = 3;
+    nearby.position = glm::vec3(100.0f, 0.0f, 0.0f);
+    world.spawns.emplace(3, nearby);
+    CHECK(matcher.matches(rat));
+    const auto found = search_spawns(search, world, static_cast<const game::GroupState*>(nullptr));
+    REQUIRE(found.size() == 1);
+    CHECK(found.front()->id == rat.id);
 }

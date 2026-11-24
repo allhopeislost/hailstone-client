@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "core/config.h"
+#include "game/combat.h"
+#include "game/doors.h"
 #include "game/world_state.h"
 #include "mq/spawn_search.h"
 #include "mq/tlo.h"
@@ -315,6 +317,94 @@ void MapFilters::set_custom(std::string_view text, const game::GuildState* guild
 
 void MapFilters::clear_custom() { set_custom({}); }
 bool MapFilters::custom_enabled() const { return custom_search_.has_value() && enabled(F::Custom); }
+
+std::optional<MapFilter> MapFilters::spawn_mark(const game::Spawn& spawn, const MapFilterSpawnInput& input) const {
+    if (!enabled(F::All)) return std::nullopt;
+    const game::eSpawnType type = spawn_type(spawn);
+    if (type == game::eSpawnType::FLYER || type == game::eSpawnType::NONE || type == game::eSpawnType::ITEM)
+        return std::nullopt;
+
+    auto base_filter = [&]() -> MapFilter {
+        switch (type) {
+        case game::eSpawnType::PC: return F::Pc;
+        case game::eSpawnType::MOUNT: return F::Mount;
+        case game::eSpawnType::PET: return F::Pet;
+        case game::eSpawnType::NPC:
+            // MQ2Map's Named colour is used for a # name; other named NPCs keep the NPC colour.
+            return enabled(F::Named) && spawn.name.find('#') != std::string::npos ? F::Named : F::Npc;
+        case game::eSpawnType::CORPSE: return spawn.deity == 0 ? F::NpcCorpse : F::PcCorpse;
+        case game::eSpawnType::CHEST: return F::Chest;
+        case game::eSpawnType::TRIGGER: return F::Trigger;
+        case game::eSpawnType::TRAP: return F::Trap;
+        case game::eSpawnType::TIMER: return F::Timer;
+        case game::eSpawnType::UNTARGETABLE: return F::Untargetable;
+        case game::eSpawnType::AURA: return F::Aura;
+        case game::eSpawnType::OBJECT: return F::Object;
+        case game::eSpawnType::BANNER: return F::Banner;
+        case game::eSpawnType::CAMPFIRE: return F::Campfire;
+        case game::eSpawnType::MERCENARY: return F::Mercenary;
+        default: return F::Invalid;
+        }
+    };
+
+    bool shown = false;
+    if (input.target && enabled(F::Target)) shown = true;
+    else if (custom_enabled()) shown = input.custom && input.custom->matches(spawn);
+    else {
+        switch (type) {
+        case game::eSpawnType::PC: shown = enabled(F::Pc); break;
+        case game::eSpawnType::MOUNT: shown = enabled(F::Mount); break;
+        case game::eSpawnType::PET: shown = enabled(F::Pet); break;
+        case game::eSpawnType::NPC:
+            shown = enabled(F::Named) ? is_named(spawn) : enabled(F::Npc);
+            break;
+        case game::eSpawnType::CORPSE:
+            shown = enabled(spawn.deity == 0 ? F::NpcCorpse : F::PcCorpse);
+            break;
+        case game::eSpawnType::CHEST: shown = enabled(F::Chest); break;
+        case game::eSpawnType::TRIGGER: shown = enabled(F::Trigger); break;
+        case game::eSpawnType::TRAP: shown = enabled(F::Trap); break;
+        case game::eSpawnType::TIMER: shown = enabled(F::Timer); break;
+        case game::eSpawnType::UNTARGETABLE: shown = enabled(F::Untargetable); break;
+        case game::eSpawnType::AURA: shown = enabled(F::Aura); break;
+        case game::eSpawnType::OBJECT: shown = enabled(F::Object); break;
+        case game::eSpawnType::BANNER: shown = enabled(F::Banner); break;
+        case game::eSpawnType::CAMPFIRE: shown = enabled(F::Campfire); break;
+        case game::eSpawnType::MERCENARY: shown = enabled(F::Mercenary); break;
+        default: break;
+        }
+    }
+    if (!shown) return std::nullopt;
+
+    const MapFilter base = base_filter();
+    if (base == F::Invalid) return std::nullopt;
+    MapFilterMark out;
+    out.marker_filter = type == game::eSpawnType::CORPSE ? F::Corpse : base;
+    out.target = input.target && enabled(F::Target);
+    out.color_filter = out.target ? F::Target : base;
+    out.rgb = state(out.color_filter).rgb;
+    if (!out.target && type == game::eSpawnType::PC && enabled(F::PcConColor))
+        out.rgb = game::con_rgb(game::con_level(spawn, input.player_level, input.pvp_rules));
+    else if (!out.target && type == game::eSpawnType::NPC && enabled(F::NpcConColor))
+        out.rgb = game::con_rgb(game::con_level(spawn, input.player_level, input.pvp_rules));
+    if (!out.target && input.group && enabled(F::Group)) {
+        out.color_filter = F::Group;
+        out.rgb = state(F::Group).rgb;
+    }
+    out.label = game::spawn_label(spawn);
+    if (type == game::eSpawnType::CORPSE && !icontains(out.label, "corpse")) out.label += "'s Corpse";
+    return out;
+}
+
+bool MapFilters::ground_visible() const { return enabled(F::Ground); }
+
+std::string MapFilters::ground_label(const game::GroundObject& object) {
+    std::string label = object.name;
+    constexpr std::string_view suffix = "_ACTORDEF";
+    if (label.size() >= suffix.size() && iequals(std::string_view(label).substr(label.size() - suffix.size()), suffix))
+        label.resize(label.size() - suffix.size());
+    return label.empty() ? std::string("Ground item") : label;
+}
 
 void MapFilters::set_anchor(MapFilter filter, glm::vec3 at) {
     if (!std::isfinite(at.x) || !std::isfinite(at.y) || !std::isfinite(at.z)) return;
