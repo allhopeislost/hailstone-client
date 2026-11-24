@@ -97,11 +97,13 @@ struct MapFilterState {
 };
 
 struct MapFilterMark {
-    MapFilter color_filter = MapFilter::Invalid;
-    MapFilter marker_filter = MapFilter::Invalid;
-    std::uint32_t rgb = 0;
+    MapFilter color_filter;
+    MapFilter marker_filter;
+    std::uint32_t rgb;
     std::string label;
-    bool target = false;
+    bool target;
+    MapFilterMark()
+        : color_filter(MapFilter::Invalid), marker_filter(MapFilter::Invalid), rgb(0), target(false) {}
 };
 
 struct MapFilterSpawnInput {
