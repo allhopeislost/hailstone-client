@@ -1168,7 +1168,7 @@ constexpr float kMapRingStepDegrees = 45.0f;
 void append_map_marker(std::vector<MapFilterLine>& lines, glm::vec3 center, mq::MapMarker shape, int size,
                        float heading, std::uint32_t rgb) {
     if (shape == mq::MapMarker::None) return;
-    const float side = static_cast<float>(std::max(size, mq::kMapFilterDefaultMarkerSize));
+    const float side = static_cast<float>(std::max(size, mq::kMapFilterMinMarkerSize));
     const auto add = [&](glm::vec2 a, glm::vec2 b) {
         lines.push_back({center + glm::vec3(a, 0.0f), center + glm::vec3(b, 0.0f), rgb});
     };
