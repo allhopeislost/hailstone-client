@@ -468,13 +468,13 @@ TEST_CASE("Map filters: NormalLabels hides only the game's map labels") {
 }
 
 TEST_CASE("test support: scoped allocation count measures global new requests") {
-    std::size_t size = 0;
     fuzz::start_allocation_count();
-    { const std::string text(256, 'x'); size = text.size(); }
+    void* memory = ::operator new(256);
+    static_cast<volatile unsigned char*>(memory)[0] = 1;
     const auto count = fuzz::stop_allocation_count();
-    CHECK(size == 256);
+    ::operator delete(memory);
     CHECK(count.calls >= 1);
-    CHECK(count.bytes >= 257);
+    CHECK(count.bytes >= 256);
 }
 
 TEST_CASE("Map filters: benchmark collection cost when requested") {
