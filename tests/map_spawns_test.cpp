@@ -344,10 +344,24 @@ TEST_CASE("Map filters: marker sizes, shapes and vector direction use the MQ geo
     CHECK(marked_vertices(r.L, minimap, kNpc) == 40);
 
     r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::None, 0);
+    std::vector<ImVec2> cross_points;
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &cross_points) == 8);
     r.filters.set_enabled(mq::MapFilter::Vector, true);
-    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 12);
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 12);
+    std::vector<ImVec2> vector_points;
+    auto refresh_vector_points = [&] {
+        vector_points.clear();
+        for (const auto& point : points)
+            if (std::none_of(cross_points.begin(), cross_points.end(), [&](ImVec2 old) {
+                    const float dx = point.x - old.x, dy = point.y - old.y;
+                    return dx * dx + dy * dy < 0.01f;
+                }))
+                vector_points.push_back(point);
+    };
+    refresh_vector_points();
+    REQUIRE(vector_points.size() == 4);
     const auto farthest = [&] {
-        return *std::max_element(points.begin(), points.end(), [&](ImVec2 a, ImVec2 b) {
+        return *std::max_element(vector_points.begin(), vector_points.end(), [&](ImVec2 a, ImVec2 b) {
             const auto ax = a.x - center.x, ay = a.y - center.y, bx = b.x - center.x, by = b.y - center.y;
             return ax * ax + ay * ay < bx * bx + by * by;
         });
@@ -356,7 +370,9 @@ TEST_CASE("Map filters: marker sizes, shapes and vector direction use the MQ geo
     CHECK(tip.y < center.y - 2.0f);
     CHECK(std::abs(tip.x - center.x) < 1.5f);
     rat.heading = 128.0f; // a quarter turn points left
-    REQUIRE(marked_vertices(r.L, minimap, kNpc, &center, &points) == 12);
+    REQUIRE(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 12);
+    refresh_vector_points();
+    REQUIRE(vector_points.size() == 4);
     tip = farthest();
     CHECK(tip.x < center.x - 2.0f);
     CHECK(std::abs(tip.y - center.y) < 1.5f);
@@ -373,7 +389,7 @@ TEST_CASE("Map filters: minimap target geometry reaches in from outside the circ
     MarkerRig r;
     auto& world = net::GameConnectionTestAccess::world(*r.world.conn);
     auto& target = world.spawns.at(10);
-    target.position = game::server_to_world({200.0f, 0.0f, 0.0f});
+    target.position = game::server_to_world({600.0f, 0.0f, 0.0f});
     target.display_valid = false;
     r.filters.set_enabled(mq::MapFilter::Target, true);
     r.filters.set_enabled(mq::MapFilter::TargetLine, true);
@@ -391,7 +407,7 @@ TEST_CASE("Map filters: minimap target geometry reaches in from outside the circ
     MarkerRig denied(filter);
     auto& denied_world = net::GameConnectionTestAccess::world(*denied.world.conn);
     auto& denied_target = denied_world.spawns.at(10);
-    denied_target.position = game::server_to_world({200.0f, 0.0f, 0.0f});
+    denied_target.position = game::server_to_world({600.0f, 0.0f, 0.0f});
     denied_target.display_valid = false;
     denied.filters.set_enabled(mq::MapFilter::Target, true);
     denied.filters.set_enabled(mq::MapFilter::TargetLine, true);
