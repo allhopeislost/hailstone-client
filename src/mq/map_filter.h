@@ -104,6 +104,7 @@ struct MapFilterMark {
     bool target;
     MapFilterMark()
         : color_filter(MapFilter::Invalid), marker_filter(MapFilter::Invalid), rgb(0), target(false) {}
+    bool is_target() const;
 };
 
 struct MapFilterSpawnInput {

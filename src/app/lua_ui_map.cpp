@@ -1348,10 +1348,10 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             // circle: those lines and arcs can still cross into view. Its own dot and label remain clipped.
             if (filters && (visible || is_target)) {
                 filtered = filters->spawn_mark(*sp, filter_input(*sp, group));
-                if (filtered && !visible && !filtered->target) filtered.reset();
+                if (filtered && !visible && !filtered->is_target()) filtered.reset();
             }
             if (!group && !custom && !filtered) continue;
-            if (!visible && !(filtered && filtered->target)) continue;
+            if (!visible && !(filtered && filtered->is_target())) continue;
             const bool allowed = c.server_ext().map_visible(c, *sp, 0); // HAILSTONE_MAP_VISIBLE_MARKER
             sp = copy(actor);
             if (!sp || !allowed) continue;
@@ -1359,12 +1359,12 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             const bool admitted_visible = !in_view || in_view(admitted_at);
             if (filters && (admitted_visible || sp->id == c.world().target_id)) {
                 filtered = filters->spawn_mark(*sp, filter_input(*sp, group));
-                if (filtered && !admitted_visible && !filtered->target) filtered.reset();
+                if (filtered && !admitted_visible && !filtered->is_target()) filtered.reset();
             } else {
                 filtered.reset();
             }
             if (!group && !custom && !filtered) continue;
-            if (!admitted_visible && !(filtered && filtered->target)) continue;
+            if (!admitted_visible && !(filtered && filtered->is_target())) continue;
             std::optional<game::MapSpawnMark> mark;
             if (custom) {
                 game::MapSpawnMark d;
@@ -1377,12 +1377,12 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             }
             // A filtered mark replaces Hailstone's stock group dot for that actor, so one spawn is not drawn twice.
             if (group && !filtered && same_group() && member(*sp)) out.group.push_back({actor, *sp});
-            if (filtered && (admitted_visible || filtered->target)) {
+            if (filtered && (admitted_visible || filtered->is_target())) {
                 game::MapSpawnMark m;
                 m.rgb = filtered->rgb;
                 m.layer = active_layer;
                 m.label = std::move(filtered->label);
-                out.filtered.push_back({actor, *sp, std::move(m), spawn_map(*sp), filtered->marker_filter, filtered->target});
+                out.filtered.push_back({actor, *sp, std::move(m), spawn_map(*sp), filtered->marker_filter, filtered->is_target()});
             }
             if (mark) {
                 const glm::vec3 mark_at = spawn_map(*sp);
@@ -1436,7 +1436,7 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
             f.mark.rgb = mark->rgb;
             f.mark.label = std::move(mark->label);
             f.marker_filter = mark->marker_filter;
-            f.target = mark->target;
+            f.target = mark->is_target();
             return !f.target && in_view && !in_view(f.at);
         });
         std::erase_if(out.ground, [&](GroundMark& g) {

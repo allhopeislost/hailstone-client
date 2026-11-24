@@ -314,6 +314,8 @@ void MapFilters::set_custom(std::string_view text, const game::GuildState* guild
 void MapFilters::clear_custom() { set_custom({}); }
 bool MapFilters::custom_enabled() const { return custom_search_.has_value() && enabled(F::Custom); }
 
+bool MapFilterMark::is_target() const { return target; }
+
 std::optional<MapFilterMark> MapFilters::spawn_mark(const game::Spawn& spawn, const MapFilterSpawnInput& input) const {
     if (!enabled(F::All)) return std::nullopt;
     const game::eSpawnType type = spawn_type(spawn);
