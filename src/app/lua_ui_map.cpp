@@ -1642,7 +1642,9 @@ int DrawMap(lua_State* L) {
             line(a.x, a.y, b.x, b.y, faded(color(overlay.rgb, 0xff), v.z_fade(overlay.start.z, overlay.end.z, feet)));
         }
         for (const auto& circle : markers.circles) {
-            if (v.z_filter && feet && (circle.center.z < *feet - v.min_z || circle.center.z > *feet + v.max_z)) continue;
+            if (v.z_filter && feet &&
+                (circle.center.z < *feet - static_cast<float>(v.min_z) || circle.center.z > *feet + static_cast<float>(v.max_z)))
+                continue;
             const ImU32 col = faded(color(circle.rgb, 0xff), v.z_fade(circle.center.z, feet));
             for (int i = 0; i < kMapCircleSegments; ++i) {
                 const float a = static_cast<float>(i) * kMapCircleStep * kMapDegreesToRadians;
@@ -1895,7 +1897,9 @@ void draw_zone_view(MapState& s, UiHost& h, const ZoneView& zv) {
             const glm::vec3 lo = circle.center - glm::vec3(circle.radius, circle.radius, 0.0f);
             const glm::vec3 hi = circle.center + glm::vec3(circle.radius, circle.radius, 0.0f);
             if (out_of_reach(lo, hi)) continue;
-            if (v.z_filter && feet && (circle.center.z < *feet - v.min_z || circle.center.z > *feet + v.max_z)) continue;
+            if (v.z_filter && feet &&
+                (circle.center.z < *feet - static_cast<float>(v.min_z) || circle.center.z > *feet + static_cast<float>(v.max_z)))
+                continue;
             const ImU32 col = faded(color(circle.rgb, 255), v.z_fade(circle.center.z, feet));
             for (int i = 0; i < kMapCircleSegments; ++i) {
                 const float a = static_cast<float>(i) * kMapCircleStep * kMapDegreesToRadians;
