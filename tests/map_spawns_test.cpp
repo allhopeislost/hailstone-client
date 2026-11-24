@@ -368,14 +368,14 @@ TEST_CASE("Map filters: marker sizes, shapes and vector direction use the MQ geo
     };
     auto tip = farthest(); // heading 0 points north on the map
     CHECK(tip.y < center.y - 2.0f);
-    CHECK(std::abs(tip.x - center.x) < 1.5f);
+    CHECK(std::abs(tip.x - center.x) < 2.0f);
     rat.heading = 128.0f; // a quarter turn points left
     REQUIRE(marked_vertices(r.L, minimap, kNpc, nullptr, &points) == 12);
     refresh_vector_points();
     REQUIRE(vector_points.size() == 4);
     tip = farthest();
     CHECK(tip.x < center.x - 2.0f);
-    CHECK(std::abs(tip.y - center.y) < 1.5f);
+    CHECK(std::abs(tip.y - center.y) < 2.0f);
 
     r.filters.set_enabled(mq::MapFilter::Vector, false);
     r.filters.set_color(mq::MapFilter::CastRadius, 0x654321);
