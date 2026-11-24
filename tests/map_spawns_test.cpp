@@ -126,6 +126,7 @@ struct MarkerRig {
         ImGui::GetIO().AddMousePosEvent(-1000, -1000);
         ImGui::GetIO().BackendFlags |= ImGuiBackendFlags_RendererHasTextures; // 1.92: the atlas is built by NewFrame
         host.in_game = host.ui_ready = host.feet_valid = true;
+        host.map_filters = &filters;
         host.game = world.game.get(); host.conn = world.conn.get(); host.zone_short_name = "qeynos2";
         host.maps_dir = scratch.path() / "maps";
         if (map_label) {
@@ -226,7 +227,6 @@ TEST_CASE("Map lines: the minimap draws the lines that cross its circle, however
         host.zone_short_name = "qeynos2";
         host.global_maps_dir = scratch.path() / "maps"; // read by the map state (the server's comes with the ini)
         host.feet_valid = true;
-        host.map_filters = &filters;
         app::UiApi api(host);
         api.begin_frame();
         lua_State* L = luaL_newstate();
