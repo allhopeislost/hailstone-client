@@ -47,7 +47,6 @@ constexpr std::array<MapFilterSpec, static_cast<std::size_t>(F::Last)> kSpecs{{
     {"Custom", F::Custom, F::All, kMapFilterNoColor, 0, "Sets a custom spawn search; omit it to disable"},
     {"CastRadius", F::CastRadius, F::All, kMapFilterRadius, 0x808080, "Sets the casting circle radius"},
     {"NormalLabels", F::NormalLabels, F::Invalid, kMapFilterToggle | kMapFilterNoColor, 0, "Toggles the game's map labels"},
-    {"Menu", F::Menu, F::Invalid, kMapFilterToggle | kMapFilterNoColor, 0, "Allows the map's right-click spawn menu"},
     {"SpellRadius", F::SpellRadius, F::All, kMapFilterRadius, 0x00c000, "Sets the second casting circle radius"},
     {"Aura", F::Aura, F::All, kMapFilterToggle, 0x404040, "Displays auras"},
     {"Object", F::Object, F::All, kMapFilterToggle, 0x404040, "Displays inanimate objects"},
@@ -59,12 +58,10 @@ constexpr std::array<MapFilterSpec, static_cast<std::size_t>(F::Last)> kSpecs{{
     {"Named", F::Named, F::All, kMapFilterToggle, 0x404040, "Displays named NPCs"},
     {"TargetPath", F::TargetPath, F::Target, kMapFilterToggle | kMapFilterNoColor, 0, "Draws the server path to your target"},
     {"Marker", F::Marker, F::All, kMapFilterNoColor, 0, "Sets a marker shape and size for a spawn type"},
-    {"CampRadius", F::CampRadius, F::All, kMapFilterRadius, 0x808080, "Sets the camp circle radius"},
-    {"PullRadius", F::PullRadius, F::All, kMapFilterRadius, 0x808080, "Sets the pull circle radius"},
 }};
 
 static_assert(kSpecs.size() == static_cast<std::size_t>(F::Last));
-static_assert(kSpecs.front().filter == F::All && kSpecs.back().filter == F::PullRadius);
+static_assert(kSpecs.front().filter == F::All && kSpecs.back().filter == F::Marker);
 
 bool valid(MapFilter filter) { return filter > F::Invalid && filter < F::Last; }
 
@@ -203,7 +200,6 @@ void MapFilters::load(Config& config) {
     states_[index_of(F::Custom)].enabled = false; // MQ2Map does not persist a custom search
     custom_text_.reset();
     custom_search_.reset();
-    camp_anchor_valid_ = pull_anchor_valid_ = false;
 }
 
 void MapFilters::save(Config& config) const {
@@ -257,8 +253,6 @@ void MapFilters::set_enabled(MapFilter filter, bool enabled) {
         state.radius = enabled ? state.radius : 0.0f;
         state.enabled = enabled && state.radius > 0.0f;
     }
-    if (filter == F::CampRadius && !enabled) camp_anchor_valid_ = false;
-    if (filter == F::PullRadius && !enabled) pull_anchor_valid_ = false;
     changed();
 }
 
@@ -271,8 +265,6 @@ void MapFilters::set_radius(MapFilter filter, float radius) {
     if (state.radius == radius && state.enabled == (radius > 0.0f)) return;
     state.radius = radius;
     state.enabled = radius > 0.0f;
-    if (filter == F::CampRadius) camp_anchor_valid_ = radius > 0.0f;
-    if (filter == F::PullRadius) pull_anchor_valid_ = radius > 0.0f;
     changed();
 }
 
@@ -406,30 +398,6 @@ std::string MapFilters::ground_label(const game::GroundObject& object) {
     return label.empty() ? std::string("Ground item") : label;
 }
 
-void MapFilters::set_anchor(MapFilter filter, glm::vec3 at) {
-    if (!std::isfinite(at.x) || !std::isfinite(at.y) || !std::isfinite(at.z)) return;
-    if (filter == F::CampRadius) {
-        camp_anchor_ = at;
-        camp_anchor_valid_ = state(filter).radius > 0.0f;
-    } else if (filter == F::PullRadius) {
-        pull_anchor_ = at;
-        pull_anchor_valid_ = state(filter).radius > 0.0f;
-    }
-}
-
-void MapFilters::observe_player(const game::Spawn* player) {
-    if (!player) return;
-    const glm::vec3 at = spawn_position(*player);
-    if (state(F::CampRadius).radius > 0.0f && !camp_anchor_valid_) {
-        camp_anchor_ = at;
-        camp_anchor_valid_ = true;
-    }
-    if (state(F::PullRadius).radius > 0.0f && !pull_anchor_valid_) {
-        pull_anchor_ = at;
-        pull_anchor_valid_ = true;
-    }
-}
-
 void run_map_filter_command(MapFilters& filters, std::string_view args, const MapFilterCommandInput& input,
                             const std::function<void(std::string_view)>& say) {
     args = trim(args);
@@ -486,8 +454,6 @@ void run_map_filter_command(MapFilters& filters, std::string_view args, const Ma
         else
             value = 0.0;
         filters.set_radius(*filter, static_cast<float>(value));
-        if ((*filter == F::CampRadius || *filter == F::PullRadius) && value > 0.0 && input.world)
-            if (const auto* player = input.world->player()) filters.set_anchor(*filter, spawn_position(*player));
         say(std::format("{} is now set to: {:.2f}", spec->name, filters.state(*filter).radius));
         return;
     }

@@ -1162,7 +1162,6 @@ MapMarkers map_markers(UiHost& h, mq::MapFilters* filters, int active_layer, boo
         };
         const auto stamp = source();
         if (!stamp) return {};
-        if (filters) filters->observe_player(c.world().player());
         std::optional<mq::SpawnSearchMatcher> custom_matcher;
         if (filters && filters->custom_enabled() && filters->custom_search()) {
             mq::SearchSources search_sources = mq::sources_of(c);

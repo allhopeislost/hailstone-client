@@ -25,16 +25,18 @@ std::vector<std::string> run(MapFilters& filters, std::string_view command, cons
 } // namespace
 
 TEST_CASE("Map filters: MacroQuest's options, defaults and dependencies") {
-    CHECK(map_filter_specs().size() == 37);
+    CHECK(map_filter_specs().size() == 34);
     CHECK(find_map_filter("all") == MapFilter::All);
     CHECK(find_map_filter("UNTARGETABLE") == MapFilter::Untargetable);
     CHECK_FALSE(find_map_filter("untargettable")); // MQ's command name is Untargetable; the docs' typo is not an alias
+    CHECK_FALSE(find_map_filter("menu"));
+    CHECK_FALSE(find_map_filter("campradius"));
+    CHECK_FALSE(find_map_filter("pullradius"));
     CHECK_FALSE(find_map_filter("missing"));
 
     MapFilters filters;
     CHECK(filters.enabled(MapFilter::All));
     CHECK(filters.enabled(MapFilter::NormalLabels)); // Hailstone keeps its existing map labels by default
-    CHECK_FALSE(filters.enabled(MapFilter::Menu));
     CHECK_FALSE(filters.enabled(MapFilter::Pc));
     CHECK(filters.state(MapFilter::Pc).rgb == 0xff00ffu);
     CHECK(filters.state(MapFilter::Npc).rgb == 0x404040u);
@@ -101,7 +103,7 @@ TEST_CASE("Map filters: status and help list the available settings") {
     CHECK(std::find(lines.begin(), lines.end(), "NormalLabels: show") != lines.end());
 
     lines = run(filters, "help");
-    REQUIRE(lines.size() == 39); // heading, 37 options and the colour hint
+    REQUIRE(lines.size() == 36); // heading, 34 options and the colour hint
     CHECK(lines.front() == "Map filtering options:");
     CHECK(std::find(lines.begin(), lines.end(), "TargetRadius #: Sets a circle radius around your target") != lines.end());
     CHECK(lines.back() == "'option' color [r g b]: set its display colour; omit the numbers to reset");
@@ -127,37 +129,18 @@ TEST_CASE("Map filters: colours clamp, reset and refuse options without a colour
     CHECK(filters.state(MapFilter::PcConColor).rgb == 0u);
 }
 
-TEST_CASE("Map filters: radii disable safely and camp or pull anchors follow the command") {
+TEST_CASE("Map filters: radii disable safely and clamp oversized values") {
     MapFilters filters;
-    game::WorldState world;
-    world.player_id = 1;
-    game::Spawn player;
-    player.id = 1;
-    player.position = glm::vec3(10.0f, 20.0f, 30.0f);
-    world.spawns.emplace(player.id, player);
-    MapFilterCommandInput input;
-    input.world = &world;
-
-    run(filters, "campradius 25", input);
-    CHECK(filters.enabled(MapFilter::CampRadius));
-    CHECK(filters.state(MapFilter::CampRadius).radius == 25.0f);
-    CHECK(filters.camp_anchor() == player.position);
-    player.position = glm::vec3(40.0f, 50.0f, 60.0f);
-    world.spawns.at(1).position = player.position;
-    filters.observe_player(world.player());
-    CHECK(filters.camp_anchor() == glm::vec3(10.0f, 20.0f, 30.0f));
-    run(filters, "campradius 30", input);
-    CHECK(filters.camp_anchor() == player.position);
-
-    run(filters, "pullradius 15", input);
-    CHECK(filters.pull_anchor() == player.position);
-    run(filters, "pullradius hide");
-    CHECK_FALSE(filters.enabled(MapFilter::PullRadius));
-    CHECK(filters.state(MapFilter::PullRadius).radius == 0.0f);
     run(filters, "castradius nan");
     CHECK(filters.state(MapFilter::CastRadius).radius == 0.0f);
     run(filters, "spellradius 2000000");
     CHECK(filters.state(MapFilter::SpellRadius).radius == kMapFilterMaxRadius);
+    run(filters, "target show");
+    run(filters, "targetradius 30");
+    CHECK(filters.enabled(MapFilter::TargetRadius));
+    CHECK(filters.state(MapFilter::TargetRadius).radius == 30.0f);
+    run(filters, "targetradius hide");
+    CHECK_FALSE(filters.enabled(MapFilter::TargetRadius));
 }
 
 TEST_CASE("Map filters: marker shapes, sizes and the master switch") {
@@ -254,20 +237,6 @@ TEST_CASE("Map filters: settings round-trip globally and clamp damaged values") 
     CHECK(clamped.state(MapFilter::SpellRadius).radius == 0.0f);
     CHECK(clamped.state(MapFilter::Ground).rgb == 0x9ac9ffu);
     CHECK(clamped.state(MapFilter::Pc).marker_size == 0);
-}
-
-TEST_CASE("Map filters: a restored camp radius starts at the first observed player") {
-    Config config;
-    config.parse("mapfilter.CampRadius.radius=20\n");
-    MapFilters filters(&config);
-    game::WorldState world;
-    world.player_id = 1;
-    game::Spawn player;
-    player.id = 1;
-    player.position = glm::vec3(-4.0f, 5.0f, 6.0f);
-    world.spawns.emplace(1, player);
-    filters.observe_player(world.player());
-    CHECK(filters.camp_anchor() == player.position);
 }
 
 TEST_CASE("Map filters: spawn types, named filtering and target precedence") {

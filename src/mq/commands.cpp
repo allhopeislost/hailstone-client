@@ -334,7 +334,6 @@ void Commands::run_timed() {
 void Commands::map_filter(std::string_view args) {
     const Context& ctx = env_.context();
     MapFilterCommandInput input;
-    input.world = ctx.conn ? &ctx.conn->world() : nullptr;
     input.guild = ctx.conn ? &ctx.conn->guild() : nullptr;
     run_map_filter_command(*env_.map_filters, args, input, [this](std::string_view line) { say(std::string(line)); });
 }

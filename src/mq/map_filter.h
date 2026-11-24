@@ -12,12 +12,10 @@
 #include <string>
 #include <string_view>
 
-#include <glm/vec3.hpp>
-
 #include "core/config.h"
 #include "mq/spawn_search.h"
 
-namespace hailstone::game { struct GuildState; struct GroundObject; struct Spawn; struct WorldState; }
+namespace hailstone::game { struct GuildState; struct GroundObject; struct Spawn; }
 
 namespace hailstone::mq {
 
@@ -46,7 +44,6 @@ enum class MapFilter : int {
     Custom,
     CastRadius,
     NormalLabels,
-    Menu,
     SpellRadius,
     Aura,
     Object,
@@ -58,8 +55,6 @@ enum class MapFilter : int {
     Named,
     TargetPath,
     Marker,
-    CampRadius,
-    PullRadius,
     Last,
 };
 
@@ -141,13 +136,6 @@ public:
     const std::optional<std::string>& custom_text() const { return custom_text_; }
     const std::optional<SpawnSearch>& custom_search() const { return custom_search_; }
 
-    // CampRadius and PullRadius keep the place where the command set them, as MQ2Map does. A restored radius starts
-    // at the first player observed; a zero radius clears its anchor.
-    void observe_player(const game::Spawn* player);
-    void set_anchor(MapFilter filter, glm::vec3 at);
-    const glm::vec3& camp_anchor() const { return camp_anchor_; }
-    const glm::vec3& pull_anchor() const { return pull_anchor_; }
-
     // The shared map presenter asks these once per collected spawn. A target is admitted before the type filters,
     // then a custom search replaces them; otherwise the MQ2Map type rules decide. Group colour is applied last,
     // while the target colour wins over it.
@@ -162,17 +150,12 @@ private:
     std::uint64_t revision_ = 0;
     std::optional<std::string> custom_text_;
     std::optional<SpawnSearch> custom_search_;
-    glm::vec3 camp_anchor_{0.0f};
-    glm::vec3 pull_anchor_{0.0f};
-    bool camp_anchor_valid_ = false;
-    bool pull_anchor_valid_ = false;
 
     void changed();
     void persist();
 };
 
 struct MapFilterCommandInput {
-    const game::WorldState* world = nullptr;
     const game::GuildState* guild = nullptr;
 };
 
