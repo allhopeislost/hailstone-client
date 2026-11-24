@@ -276,14 +276,14 @@ TEST_CASE("Map filters: vectors, markers and target overlays draw on every map v
     r.filters.set_enabled(mq::MapFilter::Npc, true);
     r.filters.set_color(mq::MapFilter::Npc, 0x123456);
     constexpr ImU32 kNpc = IM_COL32(0x12, 0x34, 0x56, 0);
-    int baseline = 0;
-    for (const auto& draw : kMapDraws) baseline = std::max(baseline, marked_vertices(r.L, draw, kNpc));
-    REQUIRE(baseline > 0);
+    std::array<int, kMapDraws.size()> baseline_counts{};
+    for (std::size_t i = 0; i < kMapDraws.size(); ++i) baseline_counts[i] = marked_vertices(r.L, kMapDraws[i], kNpc);
+    for (int count : baseline_counts) REQUIRE(count > 0);
 
     r.filters.set_enabled(mq::MapFilter::Vector, true);
     std::array<int, kMapDraws.size()> vector_counts{};
     for (std::size_t i = 0; i < kMapDraws.size(); ++i) vector_counts[i] = marked_vertices(r.L, kMapDraws[i], kNpc);
-    for (int count : vector_counts) REQUIRE(count > baseline);
+    for (std::size_t i = 0; i < kMapDraws.size(); ++i) REQUIRE(vector_counts[i] > baseline_counts[i]);
     r.filters.set_marker(mq::MapFilter::Npc, mq::MapMarker::Square, 20);
     for (std::size_t i = 0; i < kMapDraws.size(); ++i)
         CHECK(marked_vertices(r.L, kMapDraws[i], kNpc) > vector_counts[i]);
